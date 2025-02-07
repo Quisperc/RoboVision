@@ -16,7 +16,7 @@ namespace RoboVision
 
         public DeepLearningModel()
         {
-            InitializeComponent();
+            //InitializeComponent();
         }
 
         /// <summary>
@@ -66,7 +66,39 @@ namespace RoboVision
         /// <param name="modelPath">ONNX 模型文件路径</param>
         public void LoadModel(string modelPath)
         {
-            session = new InferenceSession(modelPath);
+            try
+            {
+                // 创建 SessionOptions
+                //var session_options = new SessionOptions();
+                // 添加 CUDA 执行提供程序（确保你的系统中已安装相应的 CUDA 环境）
+                // 指定 GPU 设备 ID，一般默认使用 0
+                //int gpuDeviceId = 0;
+                //var sessionOptions = SessionOptions.MakeSessionOptionWithCudaProvider(gpuDeviceId);
+                //sessionOptions.LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_VERBOSE;
+                //session = new InferenceSession(modelPath, sessionOptions);
+                //options.AppendExecutionProvider_CUDA();
+
+                //初始化模型
+                var sessionOptions = new SessionOptions();
+                try
+                {
+                    sessionOptions.AppendExecutionProvider_CUDA();  //只需要安装 Microsoft.ML.OnnxRuntime.GPU , 然后 onnxruntime 版本和 CUDA cudnn版本都要对好
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("模型初始化失败！GPU调用发生错误：" + ex.Message);
+                }
+
+                session = new InferenceSession(modelPath);
+                if (session == null)
+                {
+                    MessageBox.Show("导入模型出错: seesion 为空！" , "异常", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch(Exception ex)
+            {
+                MessageBox.Show("导入模型出错: " + ex.Message, "异常", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         /// <summary>
@@ -87,12 +119,23 @@ namespace RoboVision
             {
                 NamedOnnxValue.CreateFromTensor("images", inputTensor)
             };
-
-            using (var results = session.Run(inputs))
+            if (session == null)
             {
-                // 后处理：解析模型输出，示例中绘制一个固定矩形
-                Bitmap outputImage = PostProcessResults(original, results);
-                return outputImage;
+                MessageBox.Show("导入模型出错: seesion 为空！", "异常", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            try
+            {
+                using (var results = session.Run(inputs))
+                {
+                    // 后处理：解析模型输出，示例中绘制一个固定矩形
+                    Bitmap outputImage = PostProcessResults(original, results);
+                    return outputImage;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("处理图像出错: " + ex.Message, "异常", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return original;
             }
         }
 

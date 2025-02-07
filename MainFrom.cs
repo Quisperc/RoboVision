@@ -6,6 +6,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -33,6 +34,8 @@ namespace RoboVision
             camera = new CameraController();
             // 初始化深度学习模型
             deepLearning = new DeepLearningModel();
+            string modelPath = @"models/exp1.onnx";
+            deepLearning.LoadModel(modelPath);
             // 启动通信模块
             commModule = new CommunicationModule("127.0.0.1", 8000);
             currentCamera = "未选择";
@@ -150,6 +153,7 @@ namespace RoboVision
         // 拍摄图片并显示保存结果
         private void btnCapture_Click(object sender, EventArgs e)
         {
+            commModule.SendData(12, 34);
             camera.CaptureCurrentFrame();
             //Bitmap capturedImage = camera.CaptureImage();
             //MessageBox.Show("图片已保存!");
@@ -189,16 +193,37 @@ namespace RoboVision
             //    MessageBox.Show("没有可保存的图像。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             //}
         }
-
+        //[DllImport("onnxruntime.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
+        //public static extern IntPtr OrtSessionOptionsAppendExecutionProvider_CUDA(IntPtr options, int cudaDeviceId);
         // 处理图像、计算坐标并发送数据（与之前示例一致）
         private void btnProcess_Click(object sender, EventArgs e)
         {
-            commModule.SendData(12, 34);
             MessageBox.Show("没做好！不可以点！");
-            //string imagePath = @"C:\Images\captured.jpg";
-            //Bitmap segmentedImage = deepLearning.ProcessImage(imagePath);
-            //string segmentedPath = @"C:\Images\segmented.jpg";
-            //segmentedImage.Save(segmentedPath);
+            //// 检查是否有图像
+            //if (currentFrame == null)
+            //{
+            //    MessageBox.Show("请先捕获图像！");
+            //    return;
+            //}
+            // 检查是否有模型
+            if (deepLearning == null)
+            {
+                MessageBox.Show("未加载深度学习模型！");
+                string modelPath = @"models/exp1.onnx";
+                deepLearning.LoadModel(modelPath);
+                return;
+            }
+            // 检查是否有通信模块
+            if (camera == null)
+            {
+                MessageBox.Show("未启动通信模块！");
+                return;
+            }
+            string imagePath = @"input/image-19-_jpg.rf.c32af64a5a5e4a3d2c8b0dd70982b2aa.jpg";
+            Bitmap segmentedImage = deepLearning.ProcessImage(imagePath);
+            string segmentedPath = @"output/segmented.jpg";
+            segmentedImage.Save(segmentedPath);
+            segmentedImage?.Dispose();
             //pictureBoxDisplay.Image = segmentedImage;
 
             //// 计算物体坐标（示例：取中心点）
