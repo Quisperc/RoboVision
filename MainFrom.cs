@@ -34,7 +34,7 @@ namespace RoboVision
             camera = new CameraController();
             // 初始化深度学习模型
             deepLearning = new DeepLearningModel();
-            string modelPath = @"models/exp1.onnx";
+            string modelPath = @"models/yolov8s.onnx";
             deepLearning.LoadModel(modelPath);
             // 启动通信模块
             commModule = new CommunicationModule("127.0.0.1", 8000);
@@ -153,63 +153,32 @@ namespace RoboVision
         // 拍摄图片并显示保存结果
         private void btnCapture_Click(object sender, EventArgs e)
         {
-            commModule.SendData(12, 34);
-            camera.CaptureCurrentFrame();
-            //Bitmap capturedImage = camera.CaptureImage();
-            //MessageBox.Show("图片已保存!");
-            pictureBoxDisplay.Image = camera.GetCurrentFrame();
-
-            //if (currentFrame != null)
-            //{
-            //    using (SaveFileDialog saveFileDialog = new SaveFileDialog())
-            //    {
-            //        saveFileDialog.Filter = "JPEG Image|*.jpg|PNG Image|*.png|Bitmap Image|*.bmp";
-            //        saveFileDialog.Title = "保存捕获的图像";
-            //        saveFileDialog.FileName = "CapturedImage";
-
-            //        if (saveFileDialog.ShowDialog() == DialogResult.OK)
-            //        {
-            //            // 获取所选文件的扩展名
-            //            string fileExtension = System.IO.Path.GetExtension(saveFileDialog.FileName).ToLower();
-            //            // 根据扩展名设置图像格式
-            //            ImageFormat imgFormat = ImageFormat.Jpeg;
-            //            if (fileExtension == ".png")
-            //            {
-            //                imgFormat = ImageFormat.Png;
-            //            }
-            //            else if (fileExtension == ".bmp")
-            //            {
-            //                imgFormat = ImageFormat.Bmp;
-            //            }
-
-            //            // 保存图像
-            //            currentFrame.Save(saveFileDialog.FileName, imgFormat);
-            //            MessageBox.Show("图像已成功保存。", "保存成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            //        }
-            //    }
-            //}
-            //else
-            //{
-            //    MessageBox.Show("没有可保存的图像。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            //}
+            try
+            {
+                camera.CaptureCurrentFrame();
+                MessageBox.Show("图片已保存！");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("保存图片错误：" + ex.Message);
+            }
+            //commModule.SendData(12, 34);
         }
-        //[DllImport("onnxruntime.dll", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.Cdecl)]
-        //public static extern IntPtr OrtSessionOptionsAppendExecutionProvider_CUDA(IntPtr options, int cudaDeviceId);
         // 处理图像、计算坐标并发送数据（与之前示例一致）
         private void btnProcess_Click(object sender, EventArgs e)
         {
             MessageBox.Show("没做好！不可以点！");
-            //// 检查是否有图像
-            //if (currentFrame == null)
-            //{
-            //    MessageBox.Show("请先捕获图像！");
-            //    return;
-            //}
+            // 检查是否有图像
+            if (currentFrame == null)
+            {
+                MessageBox.Show("请先捕获图像！");
+                return;
+            }
             // 检查是否有模型
             if (deepLearning == null)
             {
                 MessageBox.Show("未加载深度学习模型！");
-                string modelPath = @"models/exp1.onnx";
+                string modelPath = @"models/yolov8s.onnx";
                 deepLearning.LoadModel(modelPath);
                 return;
             }
@@ -219,20 +188,6 @@ namespace RoboVision
                 MessageBox.Show("未启动通信模块！");
                 return;
             }
-            string imagePath = @"input/image-19-_jpg.rf.c32af64a5a5e4a3d2c8b0dd70982b2aa.jpg";
-            Bitmap segmentedImage = deepLearning.ProcessImage(imagePath);
-            string segmentedPath = @"output/segmented.jpg";
-            segmentedImage.Save(segmentedPath);
-            segmentedImage?.Dispose();
-            //pictureBoxDisplay.Image = segmentedImage;
-
-            //// 计算物体坐标（示例：取中心点）
-            //Point coordinate = ImageProcessor.ComputeObjectPosition(segmentedImage);
-            //textBoxCoordinates.Text = $"X: {coordinate.X}\r\nY: {coordinate.Y}";
-            //MessageBox.Show($"目标物体位置：X={coordinate.X}, Y={coordinate.Y}");
-
-            //// 将坐标数据发送给 Roboguide 模块
-            //commModule.SendData(coordinate.X, coordinate.Y);
         }
         // 在窗体关闭前停止预览
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)

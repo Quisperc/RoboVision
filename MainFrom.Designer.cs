@@ -63,7 +63,9 @@ namespace RoboVision
             this.labelStatus = new System.Windows.Forms.Label();
             this.textBoxCoordinates = new System.Windows.Forms.TextBox();
             this.labelCurrentCamera = new System.Windows.Forms.Label();
+            this.pictureBox1 = new System.Windows.Forms.PictureBox();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxDisplay)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
             this.SuspendLayout();
             // 
             // btnDetectCamera
@@ -143,9 +145,20 @@ namespace RoboVision
             this.labelCurrentCamera.TabIndex = 7;
             this.labelCurrentCamera.Text = "当前相机：未选择";
             // 
+            // pictureBox1
+            // 
+            this.pictureBox1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.pictureBox1.Location = new System.Drawing.Point(806, 20);
+            this.pictureBox1.Name = "pictureBox1";
+            this.pictureBox1.Size = new System.Drawing.Size(640, 480);
+            this.pictureBox1.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
+            this.pictureBox1.TabIndex = 8;
+            this.pictureBox1.TabStop = false;
+            // 
             // MainFrom
             // 
-            this.ClientSize = new System.Drawing.Size(820, 520);
+            this.ClientSize = new System.Drawing.Size(1466, 520);
+            this.Controls.Add(this.pictureBox1);
             this.Controls.Add(this.textBoxCoordinates);
             this.Controls.Add(this.labelStatus);
             this.Controls.Add(this.pictureBoxDisplay);
@@ -158,12 +171,15 @@ namespace RoboVision
             this.Text = "机器人拆垛码垛系统";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.MainForm_FormClosing);
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxDisplay)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
         }
 
         #endregion
+
+        private PictureBox pictureBox1;
     }
 }
 

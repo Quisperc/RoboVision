@@ -79,23 +79,27 @@ namespace RoboVision
                 //options.AppendExecutionProvider_CUDA();
 
                 //初始化模型
-                var sessionOptions = new SessionOptions();
+                var sessionOptions = SessionOptions.MakeSessionOptionWithCudaProvider(0);
                 try
                 {
-                    sessionOptions.AppendExecutionProvider_CUDA();  //只需要安装 Microsoft.ML.OnnxRuntime.GPU , 然后 onnxruntime 版本和 CUDA cudnn版本都要对好
+                    session = new InferenceSession("models/yolov8s.onnx", sessionOptions);
+                    //sessionOptions.AppendExecutionProvider_CUDA();  //只需要安装 Microsoft.ML.OnnxRuntime.GPU , 然后 onnxruntime 版本和 CUDA cudnn版本都要对好
                 }
                 catch (Exception ex)
                 {
                     MessageBox.Show("模型初始化失败！GPU调用发生错误：" + ex.Message);
                 }
 
-                session = new InferenceSession(modelPath);
+                //session = new InferenceSession(modelPath);
                 if (session == null)
                 {
                     MessageBox.Show("导入模型出错: seesion 为空！" , "异常", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
+                //Console.WriteLine($"Execution Provider: {session.SessionOptions.GetExecutionProvider()}");
+                // 应输出 "CUDA"
+
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 MessageBox.Show("导入模型出错: " + ex.Message, "异常", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
