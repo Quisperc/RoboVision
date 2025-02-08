@@ -35,10 +35,16 @@ namespace RoboVision
                 comboBoxResolutions.SelectedIndex = 0;
         }
 
-        private void btnConfirm_Click(object sender, EventArgs e)
+        private void btnOK_Click(object sender, EventArgs e)
         {
             SelectedResolutionIndex = comboBoxResolutions.SelectedIndex;
             DialogResult = DialogResult.OK;
+            Close();
+        }
+
+        private void btnCancel_Click(object sender, EventArgs e)
+        {
+            DialogResult = DialogResult.Cancel;
             Close();
         }
     }

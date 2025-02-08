@@ -236,7 +236,7 @@ namespace RoboVision
             }
         }
 
-        protected override void OnFormClosing(FormClosingEventArgs e)
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             base.OnFormClosing(e);
             camera.Dispose();
