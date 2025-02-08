@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Net;
@@ -47,7 +48,7 @@ using System.Windows.Forms;
 //}
 namespace RoboVision
 {
-    public partial class CommunicationModule : Form
+    public class CommunicationModule
     {
         private string ipAddress;
         private int port;
@@ -147,10 +148,7 @@ namespace RoboVision
                 }
                 catch (Exception ex)
                 {
-                    this.BeginInvoke(new Action(() =>
-                    {
-                        MessageBox.Show("接收客户端连接时出错：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }));
+                    Debug.WriteLine("监听异常: " + ex.Message);
                 }
             }
         }
@@ -190,26 +188,20 @@ namespace RoboVision
         {
             try
             {
-                MessageBox.Show("停止服务器时出错：");
-                serverRunning = false;
+                serverRunning = false; // 标志位确保线程退出循环
                 if (server != null)
                 {
-                    server.Stop();
+                    server.Stop();      // 触发 SocketException 使监听线程退出
+                    server = null;      // 避免重复调用 Stop()
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show("停止服务器时出错：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // 使用日志记录替代弹窗
+                Debug.WriteLine("停止服务器错误: " + ex.Message);
             }
-        }
 
-        #endregion
-
-        // 在窗体关闭时停止服务器
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            StopServer();
-            base.OnFormClosing(e);
+            #endregion
         }
     }
 }

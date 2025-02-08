@@ -16,14 +16,14 @@ using AForge.Video.DirectShow;
 
 namespace RoboVision
 {
-    public partial class MainFrom : Form
+    public partial class MainForm : Form
     {
         private CameraController camera;
         private DeepLearningModel deepLearning;
         private CommunicationModule commModule;
         private readonly object imageLock = new object();
 
-        public MainFrom()
+        public MainForm()
         {
             InitializeComponent();
             InitializeModules();
@@ -298,20 +298,25 @@ namespace RoboVision
                 }
 
                 // 2. 停止通信服务
-                commModule.StopServer();
+                if (commModule != null)
+                {
+                    commModule.StopServer();
+                    commModule = null; // 避免重复释放
+                }
 
 
                 // 3. 释放其他非托管资源
                 // ... (其他需要释放的资源)
 
                 // 4. 确保最后调用基类方法
-                base.OnFormClosing(e);
             }
             catch (Exception ex)
             {
-                // 记录异常日志
-                //Logger.Error($"窗体关闭异常: {ex}");
-                MessageBox.Show("程序关闭时发生错误，部分资源可能未正确释放" + ex.Message);
+                MessageBox.Show("关闭错误: " + ex.Message);
+            }
+            finally
+            {
+                base.OnFormClosing(e);
             }
         }
     }

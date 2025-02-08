@@ -101,12 +101,7 @@
     <Compile Include="CameraSelection.Designer.cs">
       <DependentUpon>CameraSelection.cs</DependentUpon>
     </Compile>
-    <Compile Include="CommunicationModule.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="CommunicationModule.Designer.cs">
-      <DependentUpon>CommunicationModule.cs</DependentUpon>
-    </Compile>
+    <Compile Include="CommunicationModule.cs" />
     <Compile Include="DeepLearningModel.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -119,11 +114,11 @@
     <Compile Include="ImageProcessor.Designer.cs">
       <DependentUpon>ImageProcessor.cs</DependentUpon>
     </Compile>
-    <Compile Include="MainFrom.cs">
+    <Compile Include="MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="MainFrom.Designer.cs">
-      <DependentUpon>MainFrom.cs</DependentUpon>
+    <Compile Include="MainForm.Designer.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
     </Compile>
     <Compile Include="ParameterInput.cs">
       <SubType>Form</SubType>
@@ -133,8 +128,8 @@
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <EmbeddedResource Include="MainFrom.resx">
-      <DependentUpon>MainFrom.cs</DependentUpon>
+    <EmbeddedResource Include="MainForm.resx">
+      <DependentUpon>MainForm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
