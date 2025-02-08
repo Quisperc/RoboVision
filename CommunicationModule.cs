@@ -190,6 +190,7 @@ namespace RoboVision
         {
             try
             {
+                MessageBox.Show("停止服务器时出错：");
                 serverRunning = false;
                 if (server != null)
                 {
