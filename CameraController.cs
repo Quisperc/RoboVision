@@ -1,27 +1,35 @@
-﻿using System;
+﻿// CameraController.cs
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
-using AForge.Video;
-using AForge.Video.DirectShow;
-using static System.Net.Mime.MediaTypeNames;
+using OpenCvSharp;
+using OpenCvSharp.Extensions;
+using System.Threading;
+using Size = OpenCvSharp.Size;
 
 namespace RoboVision
 {
     public class CameraController : IDisposable
     {
-        private FilterInfoCollection _videoDevices;
-        private VideoCaptureDevice _videoSource;
-        private Bitmap _currentFrame;
-        private bool _isCaptureRequested;
+        private VideoCapture _videoCapture;
+        private Mat _currentFrame;
+        private Thread _captureThread;
+        private bool _isRunning;
         private bool _isDisposed;
+        private Size _frameSize;
 
         public event EventHandler<Bitmap> FrameUpdated;
         public event EventHandler<string> CaptureCompleted;
         public event EventHandler<string> ErrorOccurred;
+
+        public List<string> AvailableCameras { get; } = new List<string>();
+        public List<Size> AvailableResolutions { get; } = new List<Size>();
+        public string DeviceName { get; private set; } = "未选择设备";
+        public bool IsPreviewing => _isRunning;
+        public Size CurrentResolution => _frameSize;
 
         public CameraController()
         {
@@ -30,166 +38,158 @@ namespace RoboVision
 
         public void RefreshDevices()
         {
-            _videoDevices = new FilterInfoCollection(FilterCategory.VideoInputDevice);
+            AvailableCameras.Clear();
+            for (int i = 0; i < 10; i++)
+            {
+                using (var testCapture = new VideoCapture(i))
+                {
+                    if (testCapture.IsOpened())
+                    {
+                        AvailableCameras.Add($"摄像头 {i + 1}");
+                        testCapture.Release();
+                    }
+                }
+            }
         }
 
-        public bool CameraExists => _videoDevices.Count > 0;
-
-        public IEnumerable<string> AvailableCameras =>
-            _videoDevices.Cast<FilterInfo>().Select(device => device.Name);
-
-        /// <summary>
-        /// 获取当前相机支持的分辨率列表
-        /// </summary>
-        public VideoCapabilities[] AvailableResolutions
-            => _videoSource?.VideoCapabilities ?? Array.Empty<VideoCapabilities>();
-
-        /// <summary>
-        /// 获取当前使用的分辨率
-        /// </summary>
-        public string CurrentResolution
-            => _videoSource?.VideoResolution?.FrameSize.ToString() ?? "未知";
-
-        // 新增设备信息访问
-        // <summary>
-        /// 当前设备名称
-        /// </summary>
-        public string DeviceName { get; private set; } = "未选择设备";
-        public bool IsPreviewing => _videoSource?.IsRunning ?? false;
-
-        private void UpdateDeviceInfo()
+        public void SelectCamera(int cameraIndex)
         {
-            DeviceName = _videoSource?.Source ?? "未选择设备";
+            if (cameraIndex < 0 || cameraIndex >= AvailableCameras.Count)
+                throw new ArgumentException("无效的摄像头索引");
+
+            StopCamera();
+
+            _videoCapture = new VideoCapture(cameraIndex);
+            DeviceName = AvailableCameras[cameraIndex];
+            InitializeResolutions();
         }
 
-
-        public void SelectCamera(string cameraName)
+        private void InitializeResolutions()
         {
-            if (string.IsNullOrWhiteSpace(cameraName))
-                throw new ArgumentException("Camera name cannot be empty", nameof(cameraName));
+            AvailableResolutions.Clear();
+            var standardResolutions = new List<Size>
+            {
+                new Size(1920, 1080),
+                new Size(1280, 720),
+                new Size(800, 600),
+                new Size(640, 480),
+                new Size(320, 240)
+            };
 
-            var device = _videoDevices.Cast<FilterInfo>()
-                .FirstOrDefault(d => d.Name.Equals(cameraName, StringComparison.OrdinalIgnoreCase));
+            foreach (var res in standardResolutions)
+            {
+                _videoCapture.Set(VideoCaptureProperties.FrameWidth, res.Width);
+                _videoCapture.Set(VideoCaptureProperties.FrameHeight, res.Height);
 
-            if (device == null)
-                throw new ArgumentException($"Camera '{cameraName}' not found");
+                var actualWidth = _videoCapture.Get(VideoCaptureProperties.FrameWidth);
+                var actualHeight = _videoCapture.Get(VideoCaptureProperties.FrameHeight);
 
-            if (_videoSource?.IsRunning == true)
-                StopCamera();
+                if (actualWidth == res.Width && actualHeight == res.Height)
+                {
+                    AvailableResolutions.Add(res);
+                }
+            }
 
-            _videoSource = new VideoCaptureDevice(device.MonikerString);
-            // [新增] 更新设备名称
-            DeviceName = device?.Name ?? "未知设备";
+            if (!AvailableResolutions.Any())
+            {
+                AvailableResolutions.Add(new Size(
+                    (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth),
+                    (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight)
+                ));
+            }
         }
 
         public void StartPreview()
         {
-            if (_videoSource == null)
-                throw new InvalidOperationException("No camera selected");
+            if (_videoCapture == null || !_videoCapture.IsOpened())
+                throw new InvalidOperationException("摄像头未初始化");
 
-            if (!_videoSource.IsRunning)
+            if (_isRunning) return;
+
+            _isRunning = true;
+            _captureThread = new Thread(CaptureLoop)
             {
-                _videoSource.NewFrame += OnNewFrameReceived;
-                _videoSource.Start();
+                IsBackground = true
+            };
+            _captureThread.Start();
+        }
+
+        private void CaptureLoop()
+        {
+            while (_isRunning)
+            {
+                try
+                {
+                    var frame = new Mat();
+                    if (_videoCapture.Read(frame) && !frame.Empty())
+                    {
+                        _currentFrame?.Dispose();
+                        _currentFrame = frame.Clone();
+                        _frameSize = new Size(frame.Width, frame.Height);
+
+                        using (var bitmap = BitmapConverter.ToBitmap(frame))
+                        {
+                            FrameUpdated?.Invoke(this, (Bitmap)bitmap.Clone());
+                        }
+                    }
+                    Thread.Sleep(33); // ~30fps
+                }
+                catch (Exception ex)
+                {
+                    OnErrorOccurred($"捕获错误: {ex.Message}");
+                    _isRunning = false;
+                }
             }
         }
 
         public void StopCamera()
         {
-            if (_videoSource?.IsRunning == true)
-            {
-                _videoSource.SignalToStop();
-                _videoSource.NewFrame -= OnNewFrameReceived;
-                _videoSource.WaitForStop();
-            }
+            _isRunning = false;
+            _captureThread?.Join(1000);
+            _videoCapture?.Release();
+        }
+
+        public void SetResolution(Size resolution)
+        {
+            if (!AvailableResolutions.Contains(resolution))
+                throw new ArgumentException("不支持的分辨率");
+
+            _videoCapture.Set(VideoCaptureProperties.FrameWidth, resolution.Width);
+            _videoCapture.Set(VideoCaptureProperties.FrameHeight, resolution.Height);
+            _frameSize = resolution;
         }
 
         public void CaptureFrame()
         {
-            _isCaptureRequested = true;
-        }
-
-        public bool TrySetResolution(int index)
-        {
-            if (_videoSource == null) return false;
-
-            var capabilities = _videoSource.VideoCapabilities;
-            if (capabilities == null || index < 0 || index >= capabilities.Length)
-                return false;
-
-            _videoSource.VideoResolution = capabilities[index];
-            return true;
-        }
-
-        private void OnNewFrameReceived(object sender, NewFrameEventArgs eventArgs)
-        {
             try
             {
-                // 更新当前帧
-                UpdateCurrentFrame(eventArgs.Frame);
+                if (_currentFrame == null || _currentFrame.Empty()) return;
 
-                // 处理捕获请求
-                if (_isCaptureRequested)
-                {
-                    _isCaptureRequested = false;
-                    SaveCapturedFrame(eventArgs.Frame);
-                }
-            }
-            catch (Exception ex)
-            {
-                OnErrorOccurred($"Frame processing error: {ex.Message}");
-            }
-        }
-
-        private void UpdateCurrentFrame(Bitmap frame)
-        {
-            var previous = _currentFrame;
-            _currentFrame = (Bitmap)frame.Clone();
-            previous?.Dispose();
-
-            FrameUpdated?.Invoke(this, _currentFrame);
-        }
-
-        private void SaveCapturedFrame(Bitmap frame)
-        {
-            try
-            {
                 var savePath = GetUniqueFilePath();
-                using (var clonedFrame = (Bitmap)frame.Clone())
+                using (var bitmap = BitmapConverter.ToBitmap(_currentFrame))
                 {
                     EnsureDirectoryExists(savePath);
-                    clonedFrame.Save(savePath, ImageFormat.Jpeg);
+                    bitmap.Save(savePath, ImageFormat.Jpeg);
                 }
                 CaptureCompleted?.Invoke(this, savePath);
             }
-            catch (ExternalException ex)
-            {
-                OnErrorOccurred($"Image save error: {ex.Message}");
-            }
-            catch (IOException ex)
-            {
-                OnErrorOccurred($"File operation error: {ex.Message}");
-            }
             catch (Exception ex)
             {
-                OnErrorOccurred($"Unexpected error: {ex.Message}");
+                OnErrorOccurred($"捕获失败: {ex.Message}");
             }
         }
 
         private static string GetUniqueFilePath()
         {
             var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
-            var fileName = $"Capture_{timestamp}.jpg";
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "input", fileName);
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                "input", $"Capture_{timestamp}.jpg");
         }
 
         private static void EnsureDirectoryExists(string filePath)
         {
             var directory = Path.GetDirectoryName(filePath);
-            if (!Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
+            Directory.CreateDirectory(directory);
         }
 
         private void OnErrorOccurred(string message)
@@ -202,8 +202,8 @@ namespace RoboVision
             if (_isDisposed) return;
 
             StopCamera();
-            _videoSource?.SignalToStop();
             _currentFrame?.Dispose();
+            _videoCapture?.Dispose();
 
             _isDisposed = true;
             GC.SuppressFinalize(this);

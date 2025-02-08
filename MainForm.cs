@@ -1,174 +1,67 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Diagnostics;
+﻿// MainForm.cs
+using System;
 using System.Drawing;
-using System.Drawing.Imaging;
-using System.IO;
+using System.Windows.Forms;
+using OpenCvSharp;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
-using System.Windows.Forms;
-using AForge.Imaging.Filters;
-using AForge.Video;
-using AForge.Video.DirectShow;
 
 namespace RoboVision
 {
     public partial class MainForm : Form
     {
-        private CameraController camera;
-        private DeepLearningModel deepLearning;
-        private CommunicationModule commModule;
-        private readonly object imageLock = new object();
+        private CameraController _camera;
+        private DeepLearningModel _dlModel;
+        private CommunicationModule _comms;
+        private readonly object _imageLock = new object();
+        private bool _isClosing;
 
         public MainForm()
         {
             InitializeComponent();
             InitializeModules();
+            SetupEventHandlers();
         }
+
         private void InitializeModules()
         {
-            // 初始化相机控制器并订阅事件
-            camera = new CameraController();
-            camera.FrameUpdated += Camera_FrameUpdated;
-            camera.CaptureCompleted += Camera_CaptureCompleted;
-            camera.ErrorOccurred += Camera_ErrorOccurred;
+            // 初始化相机模块
+            _camera = new CameraController();
 
-            // 初始化深度学习模型
-            deepLearning = new DeepLearningModel();
-            string modelPath = @"models/yolov8s.onnx";
-            deepLearning.LoadModel(modelPath);
+            // 初始化深度学习模块
+            _dlModel = new DeepLearningModel();
 
-            // 启动通信模块
-            commModule = new CommunicationModule("127.0.0.1", 8000);
-            UpdateCameraStatus("未连接");
+            // 初始化通信模块
+            _comms = new CommunicationModule();
+            _comms.StartServer("127.0.0.1", 8000);
         }
-        // 更新显示当前相机状态的Label
-        private void UpdateCameraStatus(string status)
+
+        private void SetupEventHandlers()
         {
-            if (labelCurrentCamera.InvokeRequired)
-            {
-                labelCurrentCamera.BeginInvoke(new Action(() =>
-                    labelCurrentCamera.Text = $"相机状态：{status}"));
-            }
-            else
-            {
-                labelCurrentCamera.Text = $"相机状态：{status}";
-            }
-        }
-        // 检测相机并弹出选择窗口
-        private void btnDetectCamera_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                camera.StopCamera();
-                camera.RefreshDevices();
+            // 相机事件
+            _camera.FrameUpdated += Camera_FrameUpdated;
+            _camera.CaptureCompleted += Camera_CaptureCompleted;
+            _camera.ErrorOccurred += Camera_ErrorOccurred;
 
-                if (!camera.CameraExists)
-                {
-                    MessageBox.Show("未检测到可用相机设备！");
-                    return;
-                }
+            // 深度学习事件
+            _dlModel.ModelLoaded += DlModel_ModelLoaded;
+            _dlModel.InferenceCompleted += DlModel_InferenceCompleted;
+            _dlModel.ErrorOccurred += DlModel_ErrorOccurred;
 
-                var cameras = new List<string>(camera.AvailableCameras);
-                using (var csForm = new CameraSelection(cameras))
-                {
-                    if (csForm.ShowDialog() == DialogResult.OK)
-                    {
-                        camera.SelectCamera(csForm.SelectedCamera);
-                        UpdateCameraStatus($"已连接 - {csForm.SelectedCamera}");
-                        StartPreview();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                HandleError($"相机初始化失败：{ex.Message}");
-            }
+            // 通信事件
+            _comms.DataReceived += Comms_DataReceived;
+            _comms.StatusChanged += Comms_StatusChanged;
         }
-        // 视频预览
-        private void StartPreview()
-        {
-            try
-            {
-                camera.StartPreview();
-                UpdateCameraStatus("实时预览中...");
-            }
-            catch (InvalidOperationException ex)
-            {
-                HandleError(ex.Message);
-            }
-        }
+
+        #region 事件处理方法
         private void Camera_FrameUpdated(object sender, Bitmap frame)
         {
-            try
-            {
-                UpdatePreview(frame);
-            }
-            catch (Exception ex)
-            {
-                HandleError($"画面更新失败：{ex.Message}");
-            }
-        }
-        private void UpdatePreview(Bitmap frame)
-        {
-            // 有效性验证（关键修正点1）
-            if (frame == null || frame.Width <= 0 || frame.Height <= 0)
-                return;
-
-            Bitmap clonedFrame = null;
-
-            try
-            {
-                // 立即克隆（关键修正点2）
-                clonedFrame = (Bitmap)frame.Clone();
-
-                Action updateAction = () =>
-                {
-                    lock (imageLock)
-                    {
-                        UpdateImageSafe(clonedFrame);
-                    }
-                };
-
-                if (pictureBoxDisplay.InvokeRequired)
-                {
-                    // 传递已克隆的副本（关键修正点3）
-                    pictureBoxDisplay.BeginInvoke(updateAction);
-                }
-                else
-                {
-                    updateAction();
-                }
-            }
-            catch (ArgumentException ex)
-            {
-                Debug.WriteLine($"图像处理异常：{ex.Message}");
-                clonedFrame?.Dispose();
-            }
-            catch (InvalidOperationException ex)
-            {
-                Debug.WriteLine($"跨线程错误：{ex.Message}");
-                clonedFrame?.Dispose();
-            }
+            UpdatePreview(frame);
         }
 
-        private void UpdateImageSafe(Bitmap newImage)
-        {
-            try
-            {
-                var old = pictureBoxDisplay.Image;
-                pictureBoxDisplay.Image = (Bitmap)newImage.Clone();
-                old?.Dispose();
-            }
-            finally
-            {
-                newImage.Dispose(); // 确保释放克隆的临时对象
-            }
-        }
         private void Camera_CaptureCompleted(object sender, string savePath)
         {
             ShowMessage($"图片已保存至：{savePath}");
@@ -176,160 +69,261 @@ namespace RoboVision
 
         private void Camera_ErrorOccurred(object sender, string error)
         {
-            HandleError(error);
+            HandleError($"相机错误：{error}");
+        }
+
+        private void DlModel_ModelLoaded(object sender, string msg)
+        {
+            UpdateStatus($"模型加载：{msg}");
+        }
+
+        private void DlModel_InferenceCompleted(object sender, string msg)
+        {
+            UpdateStatus(msg);
+        }
+
+        private void DlModel_ErrorOccurred(object sender, string msg)
+        {
+            HandleError($"模型错误：{msg}");
+        }
+
+        private void Comms_DataReceived(object sender, string data)
+        {
+            LogData($"收到：{data}");
+        }
+
+        private void Comms_StatusChanged(object sender, string msg)
+        {
+            UpdateStatus($"通信状态：{msg}");
+        }
+        #endregion
+
+        #region UI控件事件
+        private void btnDetectCamera_Click(object sender, EventArgs e)
+        {
+            DetectCameraDevices();
         }
 
         private void btnSetParameters_Click(object sender, EventArgs e)
         {
-            try
-            {
-                // [修正点1] 直接从CameraController获取分辨率参数
-                var capabilities = camera.AvailableResolutions; // 替换GetCurrentCamera()
-
-                // [修正点2] 检查是否存在可用分辨率
-                if (capabilities.Length == 0)
-                {
-                    MessageBox.Show("请先选择可用相机");
-                    return;
-                }
-
-                // [修正点3] 传入正确的参数类型
-                using (var paramForm = new ParameterInputForm(capabilities))
-                {
-                    if (paramForm.ShowDialog() == DialogResult.OK)
-                    {
-                        if (camera.TrySetResolution(paramForm.SelectedResolutionIndex))
-                        {
-                            RestartPreview();
-                            ShowMessage($"当前分辨率：{camera.CurrentResolution}");
-                        }
-                        else
-                        {
-                            HandleError("分辨率设置失败");
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                HandleError($"参数设置错误：{ex.Message}");
-            }
-        }
-        private void RestartPreview()
-        {
-            camera.StopCamera();
-            StartPreview();
+            ShowResolutionOptions();
         }
 
         private void btnCapture_Click(object sender, EventArgs e)
         {
+            CaptureFrame();
+        }
+
+        private void btnProcess_Click(object sender, EventArgs e)
+        {
+            ProcessCurrentFrame();
+        }
+
+        private void btnLoadModel_Click(object sender, EventArgs e)
+        {
+            var dlg = new OpenFileDialog();
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                _dlModel.LoadModel(dlg.FileName);
+            }
+        }
+        #endregion
+
+        #region 核心业务方法
+        private void DetectCameraDevices()
+        {
             try
             {
-                camera.CaptureFrame();
+                _camera.StopCamera();
+                _camera.RefreshDevices();
+
+                if (!_camera.AvailableCameras.Any())
+                {
+                    ShowMessage("未检测到可用相机设备！");
+                    return;
+                }
+
+                var csForm = new CameraSelection(_camera.AvailableCameras);
+                if (csForm.ShowDialog() == DialogResult.OK)
+                {
+                    _camera.SelectCamera(csForm.SelectedCameraIndex);
+                    UpdateStatus($"已连接 - {_camera.DeviceName}");
+                    ShowResolutionOptions();
+                }
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex)
+            {
+                HandleError($"相机初始化失败：{ex.Message}");
+            }
+        }
+
+        private void ShowResolutionOptions()
+        {
+            // 直接使用转换后的分辨率列表
+            var paramForm = new ParameterInputForm(_camera.AvailableResolutions);
+
+            if (paramForm.ShowDialog() == DialogResult.OK)
+            {
+                // 这里会调用我们新增的System.Drawing.Size参数重载方法
+                _camera.SetResolution(paramForm.SelectedResolution);
+                StartPreview();
+                ShowMessage($"当前分辨率：{_camera.CurrentResolution}");
+            }
+        }
+
+        private void StartPreview()
+        {
+            try
+            {
+                _camera.StartPreview();
+                UpdateStatus($"实时预览中 - {_camera.CurrentResolution}");
+            }
+            catch (Exception ex)
             {
                 HandleError(ex.Message);
             }
         }
 
-        private void btnProcess_Click(object sender, EventArgs e)
+        private void CaptureFrame()
         {
-            MessageBox.Show("没做好！不可以点！");
-            // 检查是否有图像
-            //if (currentFrame == null)
-            //{
-            //    MessageBox.Show("请先捕获图像！");
-            //    return;
-            //}
-            // 检查是否有模型
-            if (deepLearning == null)
+            try
             {
-                MessageBox.Show("未加载深度学习模型！");
-                string modelPath = @"models/yolov8s.onnx";
-                deepLearning.LoadModel(modelPath);
-                return;
+                _camera.CaptureFrame();
             }
-            // 检查是否有通信模块
-            if (camera == null)
+            catch (Exception ex)
             {
-                MessageBox.Show("未启动通信模块！");
-                return;
+                HandleError(ex.Message);
             }
+        }
+
+        private void ProcessCurrentFrame()
+        {
+            var frame = GetCurrentFrame();
+            if (frame == null) return;
+
+            Task.Run(() =>
+            {
+                var result = _dlModel.ProcessFrame(frame);
+                if (result != null)
+                {
+                    UpdateProcessedImage(result.ProcessedImage);
+                    SendDetectionResults(result.Detections);
+                }
+            });
+        }
+        #endregion
+
+        #region 辅助方法
+        private Bitmap GetCurrentFrame()
+        {
+            lock (_imageLock)
+            {
+                return pictureBoxDisplay.Image != null
+                    ? new Bitmap(pictureBoxDisplay.Image)
+                    : null;
+            }
+        }
+
+        private void UpdatePreview(Bitmap frame)
+        {
+            SafeInvoke(() =>
+            {
+                if (frame == null || frame.Width <= 0 || frame.Height <= 0)
+                    return;
+
+                lock (_imageLock)
+                {
+                    var old = pictureBoxDisplay.Image;
+                    pictureBoxDisplay.Image = new Bitmap(frame);
+                    old?.Dispose();
+                }
+            });
+        }
+
+        private void UpdateProcessedImage(Bitmap image)
+        {
+            SafeInvoke(() =>
+            {
+                lock (_imageLock)
+                {
+                    var old = pictureBoxDisplay.Image;
+                    pictureBoxDisplay.Image = new Bitmap(image);
+                    old?.Dispose();
+                }
+            });
+        }
+
+        private void SendDetectionResults(List<BoundingBox> detections)
+        {
+            var sb = new StringBuilder();
+            foreach (var box in detections)
+            {
+                sb.AppendLine($"{box.Label},{box.Confidence:F2},{box.Rect.X},{box.Rect.Y},{box.Rect.Width},{box.Rect.Height}");
+            }
+            _comms.SendToClient("127.0.0.1", 8000, sb.ToString());
+        }
+
+        private void UpdateStatus(string message)
+        {
+            SafeInvoke(() => labelStatus.Text = message);
+        }
+
+        private void LogData(string message)
+        {
+            //SafeInvoke(() => listBoxCoordinates.Items.Add($"{DateTime.Now:T} {message}"));
         }
 
         private void ShowMessage(string message)
         {
-            if (InvokeRequired)
-            {
-                BeginInvoke(new Action(() => MessageBox.Show(message)));
-            }
-            else
-            {
-                MessageBox.Show(message);
-            }
+            SafeInvoke(() => MessageBox.Show(message));
         }
 
         private void HandleError(string error)
         {
-            if (InvokeRequired)
-            {
-                BeginInvoke(new Action(() =>
-                {
-                    MessageBox.Show(error, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    UpdateCameraStatus("错误状态");
-                }));
-            }
-            else
+            SafeInvoke(() =>
             {
                 MessageBox.Show(error, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                UpdateCameraStatus("错误状态");
-            }
+                UpdateStatus($"错误：{error}");
+            });
         }
 
+        private void SafeInvoke(Action action)
+        {
+            if (InvokeRequired)
+                BeginInvoke(action);
+            else
+                action();
+        }
+        #endregion
+
+        #region 资源清理
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            //if (isClosing)
-            //{
-            //    e.Cancel = true; // 直接阻止重复关闭
-            //    return;
-            //}
-
-            //isClosing = true;
+            if (_isClosing) return;
+            _isClosing = true;
 
             try
             {
-                // 释放资源
-                if (camera != null)
-                {
-                    camera.Dispose();
-                    camera = null;
-                }
+                _camera?.Dispose();
+                _dlModel?.Dispose();
+                _comms?.Dispose();
 
-                if (commModule != null)
+                lock (_imageLock)
                 {
-                    commModule.StopServer();
-                    commModule = null;
+                    var img = pictureBoxDisplay.Image;
+                    pictureBoxDisplay.Image = null;
+                    img?.Dispose();
                 }
-                if(deepLearning!=null)
-                {
-                    deepLearning.Dispose();
-                    deepLearning = null;
-                }
-                // 不再需要调用 base.OnFormClosing(e)!
             }
             catch (Exception ex)
             {
-                MessageBox.Show("关闭错误: " + ex.Message);
-            }
-            finally
-            {
-                //isClosing = false;
+                Debug.WriteLine($"资源释放异常：{ex}");
             }
 
-            // 关键：手动标记窗体允许关闭
-            e.Cancel = false;
+            base.OnFormClosing(e);
         }
-
+        #endregion
     }
+
+    // 保持其他辅助类（CameraSelection, ParameterInputForm）不变
 }

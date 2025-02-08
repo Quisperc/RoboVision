@@ -1,45 +1,48 @@
-﻿    using AForge.Video.DirectShow;
+﻿// ParameterInputForm.cs
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace RoboVision
 {
     public partial class ParameterInputForm : Form
     {
-        // 修改构造函数参数类型
-        public ParameterInputForm(IEnumerable<VideoCapabilities> capabilities)
+        public Size SelectedResolution { get; private set; }
+
+        public ParameterInputForm(IEnumerable<Size> resolutions)
         {
             InitializeComponent();
-            LoadResolutions(capabilities);
+            LoadResolutions(resolutions);
         }
 
-        public int SelectedResolutionIndex { get; private set; } = -1;
-
-        private void LoadResolutions(IEnumerable<VideoCapabilities> capabilities)
+        private void LoadResolutions(IEnumerable<Size> resolutions)
         {
             comboBoxResolutions.Items.Clear();
-
-            foreach (var cap in capabilities.OrderBy(c => c.FrameSize.Width))
+            foreach (var res in resolutions.OrderBy(r => r.Width))
             {
-                comboBoxResolutions.Items.Add($"{cap.FrameSize.Width}x{cap.FrameSize.Height}");
+                comboBoxResolutions.Items.Add($"{res.Width}x{res.Height}");
             }
-
-            if (comboBoxResolutions.Items.Count > 0)
-                comboBoxResolutions.SelectedIndex = 0;
+            comboBoxResolutions.SelectedIndex = 0;
         }
 
         private void btnOK_Click(object sender, EventArgs e)
         {
-            SelectedResolutionIndex = comboBoxResolutions.SelectedIndex;
-            DialogResult = DialogResult.OK;
-            Close();
+            if (comboBoxResolutions.SelectedItem is string selected)
+            {
+                var parts = selected.Split('x');
+                if (parts.Length == 2 &&
+                    int.TryParse(parts[0], out int width) &&
+                    int.TryParse(parts[1], out int height))
+                {
+                    SelectedResolution = new Size(width, height);
+                    DialogResult = DialogResult.OK;
+                    Close();
+                    return;
+                }
+            }
+            MessageBox.Show("请选择有效的分辨率");
         }
 
         private void btnCancel_Click(object sender, EventArgs e)
