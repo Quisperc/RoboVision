@@ -116,6 +116,7 @@ namespace RoboVision
 
         private void btnProcess_Click(object sender, EventArgs e)
         {
+            _dlModel.LoadModel(@"models/yolov8s.onnx");
             ProcessCurrentFrame();
         }
 
