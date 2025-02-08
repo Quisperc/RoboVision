@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -113,30 +114,59 @@ namespace RoboVision
         }
         private void UpdatePreview(Bitmap frame)
         {
-            if (pictureBoxDisplay.InvokeRequired)
+            // 有效性验证（关键修正点1）
+            if (frame == null || frame.Width <= 0 || frame.Height <= 0)
+                return;
+
+            Bitmap clonedFrame = null;
+
+            try
             {
-                pictureBoxDisplay.BeginInvoke(new Action(() =>
+                // 立即克隆（关键修正点2）
+                clonedFrame = (Bitmap)frame.Clone();
+
+                Action updateAction = () =>
                 {
                     lock (imageLock)
                     {
-                        UpdateImageSafe(frame.Clone() as Bitmap);
+                        UpdateImageSafe(clonedFrame);
                     }
-                }));
-            }
-            else
-            {
-                lock (imageLock)
+                };
+
+                if (pictureBoxDisplay.InvokeRequired)
                 {
-                    UpdateImageSafe(frame.Clone() as Bitmap);
+                    // 传递已克隆的副本（关键修正点3）
+                    pictureBoxDisplay.BeginInvoke(updateAction);
+                }
+                else
+                {
+                    updateAction();
                 }
             }
+            catch (ArgumentException ex)
+            {
+                Debug.WriteLine($"图像处理异常：{ex.Message}");
+                clonedFrame?.Dispose();
+            }
+            catch (InvalidOperationException ex)
+            {
+                Debug.WriteLine($"跨线程错误：{ex.Message}");
+                clonedFrame?.Dispose();
+            }
         }
-        // 安全更新 PictureBox 中的图像
+
         private void UpdateImageSafe(Bitmap newImage)
         {
-            var old = pictureBoxDisplay.Image;
-            pictureBoxDisplay.Image = newImage;
-            old?.Dispose();
+            try
+            {
+                var old = pictureBoxDisplay.Image;
+                pictureBoxDisplay.Image = (Bitmap)newImage.Clone();
+                old?.Dispose();
+            }
+            finally
+            {
+                newImage.Dispose(); // 确保释放克隆的临时对象
+            }
         }
         private void Camera_CaptureCompleted(object sender, string savePath)
         {
@@ -204,7 +234,27 @@ namespace RoboVision
 
         private void btnProcess_Click(object sender, EventArgs e)
         {
-            // 处理逻辑保持不变...
+            MessageBox.Show("没做好！不可以点！");
+            // 检查是否有图像
+            //if (currentFrame == null)
+            //{
+            //    MessageBox.Show("请先捕获图像！");
+            //    return;
+            //}
+            // 检查是否有模型
+            if (deepLearning == null)
+            {
+                MessageBox.Show("未加载深度学习模型！");
+                string modelPath = @"models/yolov8s.onnx";
+                deepLearning.LoadModel(modelPath);
+                return;
+            }
+            // 检查是否有通信模块
+            if (camera == null)
+            {
+                MessageBox.Show("未启动通信模块！");
+                return;
+            }
         }
 
         private void ShowMessage(string message)
@@ -238,9 +288,31 @@ namespace RoboVision
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            base.OnFormClosing(e);
-            camera.Dispose();
-            commModule.StopServer();
+            try
+            {
+                // 1. 释放相机资源
+                if (camera != null)
+                {
+                    camera.Dispose();
+                    camera = null; // 避免重复释放
+                }
+
+                // 2. 停止通信服务
+                commModule.StopServer();
+
+
+                // 3. 释放其他非托管资源
+                // ... (其他需要释放的资源)
+
+                // 4. 确保最后调用基类方法
+                base.OnFormClosing(e);
+            }
+            catch (Exception ex)
+            {
+                // 记录异常日志
+                //Logger.Error($"窗体关闭异常: {ex}");
+                MessageBox.Show("程序关闭时发生错误，部分资源可能未正确释放" + ex.Message);
+            }
         }
     }
 }
