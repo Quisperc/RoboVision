@@ -94,12 +94,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="CameraController.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="CameraController.Designer.cs">
-      <DependentUpon>CameraController.cs</DependentUpon>
-    </Compile>
+    <Compile Include="CameraController.cs" />
     <Compile Include="CameraSelection.cs">
       <SubType>Form</SubType>
     </Compile>
