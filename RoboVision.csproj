@@ -102,12 +102,7 @@
       <DependentUpon>CameraSelection.cs</DependentUpon>
     </Compile>
     <Compile Include="CommunicationModule.cs" />
-    <Compile Include="DeepLearningModel.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="DeepLearningModel.Designer.cs">
-      <DependentUpon>DeepLearningModel.cs</DependentUpon>
-    </Compile>
+    <Compile Include="DeepLearningModel.cs" />
     <Compile Include="ImageProcessor.cs">
       <SubType>Form</SubType>
     </Compile>

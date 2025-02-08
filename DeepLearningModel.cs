@@ -10,7 +10,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace RoboVision
 {
-    public partial class DeepLearningModel : Form
+    public class DeepLearningModel : IDisposable
     {
         private InferenceSession session;
 
@@ -68,40 +68,21 @@ namespace RoboVision
         {
             try
             {
-                // 创建 SessionOptions
-                //var session_options = new SessionOptions();
-                // 添加 CUDA 执行提供程序（确保你的系统中已安装相应的 CUDA 环境）
-                // 指定 GPU 设备 ID，一般默认使用 0
-                //int gpuDeviceId = 0;
-                //var sessionOptions = SessionOptions.MakeSessionOptionWithCudaProvider(gpuDeviceId);
-                //sessionOptions.LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_VERBOSE;
-                //session = new InferenceSession(modelPath, sessionOptions);
-                //options.AppendExecutionProvider_CUDA();
-
-                //初始化模型
                 var sessionOptions = SessionOptions.MakeSessionOptionWithCudaProvider(0);
-                try
-                {
-                    session = new InferenceSession("models/yolov8s.onnx", sessionOptions);
-                    //sessionOptions.AppendExecutionProvider_CUDA();  //只需要安装 Microsoft.ML.OnnxRuntime.GPU , 然后 onnxruntime 版本和 CUDA cudnn版本都要对好
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("模型初始化失败！GPU调用发生错误：" + ex.Message);
-                }
-
-                //session = new InferenceSession(modelPath);
-                if (session == null)
-                {
-                    MessageBox.Show("导入模型出错: seesion 为空！" , "异常", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-                //Console.WriteLine($"Execution Provider: {session.SessionOptions.GetExecutionProvider()}");
-                // 应输出 "CUDA"
-
+                session = new InferenceSession(modelPath, sessionOptions);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("导入模型出错: " + ex.Message, "异常", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // 回退到 CPU 模式
+                try
+                {
+                    session = new InferenceSession(modelPath);
+                    MessageBox.Show("GPU 初始化失败，已回退到 CPU 模式：" + ex.Message);
+                }
+                catch (Exception cpuEx)
+                {
+                    MessageBox.Show("模型加载完全失败：" + cpuEx.Message);
+                }
             }
         }
 
@@ -161,6 +142,7 @@ namespace RoboVision
                     tensor[0, 2, y, x] = pixel.B / 255.0f;
                 }
             }
+
             return tensor;
         }
 
@@ -179,6 +161,14 @@ namespace RoboVision
                 g.DrawRectangle(pen, detectionRect);
             }
             return output;
+        }
+        public void Dispose()
+        {
+            if (session != null)
+            {
+                session.Dispose();
+                session = null;
+            }
         }
     }
 }

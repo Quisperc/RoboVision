@@ -11,6 +11,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using AForge.Imaging.Filters;
 using AForge.Video;
 using AForge.Video.DirectShow;
 
@@ -286,29 +287,36 @@ namespace RoboVision
             }
         }
 
-        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            //if (isClosing)
+            //{
+            //    e.Cancel = true; // 直接阻止重复关闭
+            //    return;
+            //}
+
+            //isClosing = true;
+
             try
             {
-                // 1. 释放相机资源
+                // 释放资源
                 if (camera != null)
                 {
                     camera.Dispose();
-                    camera = null; // 避免重复释放
+                    camera = null;
                 }
 
-                // 2. 停止通信服务
                 if (commModule != null)
                 {
                     commModule.StopServer();
-                    commModule = null; // 避免重复释放
+                    commModule = null;
                 }
-
-
-                // 3. 释放其他非托管资源
-                // ... (其他需要释放的资源)
-
-                // 4. 确保最后调用基类方法
+                if(deepLearning!=null)
+                {
+                    deepLearning.Dispose();
+                    deepLearning = null;
+                }
+                // 不再需要调用 base.OnFormClosing(e)!
             }
             catch (Exception ex)
             {
@@ -316,8 +324,12 @@ namespace RoboVision
             }
             finally
             {
-                base.OnFormClosing(e);
+                //isClosing = false;
             }
+
+            // 关键：手动标记窗体允许关闭
+            e.Cancel = false;
         }
+
     }
 }
