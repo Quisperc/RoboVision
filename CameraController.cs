@@ -8,7 +8,7 @@ using System.Linq;
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
 using System.Threading;
-using Size = OpenCvSharp.Size;
+using Size = System.Drawing.Size;
 
 namespace RoboVision
 {
