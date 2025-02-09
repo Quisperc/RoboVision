@@ -1,39 +1,41 @@
-﻿// CameraSelection.cs
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
 using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace RoboVision
 {
     public partial class CameraSelection : Form
     {
-        public int SelectedCameraIndex { get; private set; } = 1;
+        public string SelectedCamera { get; private set; }
 
-        public CameraSelection(IEnumerable<string> cameras)
+        public CameraSelection(List<string> cameras)
         {
             InitializeComponent();
-            listBoxCameras.DataSource = cameras.ToList();
+            listBoxCameras.DataSource = cameras;
         }
 
         private void btnOK_Click(object sender, EventArgs e)
         {
-            if (listBoxCameras.SelectedIndex >= 0)
+            if (listBoxCameras.SelectedItem != null)
             {
-                SelectedCameraIndex = listBoxCameras.SelectedIndex;
+                SelectedCamera = listBoxCameras.SelectedItem.ToString();
                 DialogResult = DialogResult.OK;
-                Close();
             }
             else
             {
-                MessageBox.Show("请先选择一个摄像头");
+                MessageBox.Show("请先选择一个相机。");
             }
         }
 
         private void btnCancel_Click(object sender, EventArgs e)
         {
             DialogResult = DialogResult.Cancel;
-            Close();
         }
     }
 }
