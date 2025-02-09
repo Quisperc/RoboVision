@@ -1,170 +1,382 @@
-﻿using System;
+﻿// CameraController.cs
+using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using OpenCvSharp;
+using OpenCvSharp.Extensions;
+using System.Threading;
+using Size = System.Drawing.Size;
+using DirectShowLib;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
+using FormatType = DirectShowLib.FormatType;
+using System.Net.Http;
 using System.Windows.Forms;
-//相机使用AForge.Video库
-using AForge.Video;
-using AForge.Video.DirectShow;
 
 namespace RoboVision
 {
-    public partial class CameraController : Form
+    public class CameraController : IDisposable
     {
-        private FilterInfoCollection videoDevices;
-        private VideoCaptureDevice videoSource;
-        private Bitmap currentFrame;               // 当前帧图像
-        // 标识是否需要在下一个新帧时捕获图像
-        private bool isCaptureRequested = false;
+        private VideoCapture _videoCapture;
+        private Mat _currentFrame;
+        private Thread _captureThread;
+        private bool _isRunning;
+        private bool _isDisposed;
+        private Size _frameSize;
 
+        private int _selectedCameraIndex;
+
+
+        public event EventHandler<Bitmap> FrameUpdated;
+        public event EventHandler<string> CaptureCompleted;
+        public event EventHandler<string> ErrorOccurred;
+
+        public List<string> AvailableCameras { get; } = new List<string>();
+        public List<Size> AvailableResolutions { get; } = new List<Size>();
+        public string DeviceName { get; private set; } = "未选择设备";
+        public bool IsPreviewing => _isRunning;
+        public Size CurrentResolution => _frameSize;
         public CameraController()
         {
-            // 初始化时获取所有视频输入设备
-            videoDevices = new FilterInfoCollection(FilterCategory.VideoInputDevice);
+            RefreshDevices();
         }
 
-        // 检测是否存在相机
-        public bool DetectCamera()
+        public void RefreshDevices()
         {
-            videoDevices = new FilterInfoCollection(FilterCategory.VideoInputDevice);
-            return videoDevices.Count > 0;
-        }
-
-        // 返回可用相机名称列表
-        public List<string> GetAvailableCameras()
-        {
-            List<string> cameras = new List<string>();
-            videoDevices = new FilterInfoCollection(FilterCategory.VideoInputDevice);
-            foreach (FilterInfo device in videoDevices)
+            _videoCapture?.Dispose();
+            _videoCapture = null;
+            _videoCapture = new VideoCapture();
+            AvailableCameras.Clear();
+            try
             {
-                cameras.Add(device.Name);
-            }
-            return cameras;
-        }
-
-        // 设置当前选中的相机（通过设备名称匹配）
-        public void SetSelectedCamera(string cameraName)
-        {
-            videoDevices = new FilterInfoCollection(FilterCategory.VideoInputDevice);
-            foreach (FilterInfo device in videoDevices)
-            {
-                if (device.Name.Equals(cameraName, StringComparison.OrdinalIgnoreCase))
+                // 使用 DirectShow 获取设备名称
+                DsDevice[] devices = DsDevice.GetDevicesOfCat(FilterCategory.VideoInputDevice);
+                foreach (DsDevice device in devices)
                 {
-                    videoSource = new VideoCaptureDevice(device.MonikerString);
-                    break;
+                    AvailableCameras.Add(device.Name);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 记录错误但不要吞掉异常
+                Debug.WriteLine($"DirectShow设备枚举失败: {ex.Message}");
+                // 回退方法需要明确说明索引不可靠
+                for (int i = 0; i < 10; i++)
+                {
+                    using (var testCapture = new VideoCapture(i, VideoCaptureAPIs.DSHOW))
+                    {
+                        if (testCapture.IsOpened())
+                        {
+                            AvailableCameras.Add($"摄像头 {i + 1}");
+                            testCapture.Release();
+                        }
+                    }
                 }
             }
         }
 
-        // 获取当前选中的相机对象
-        public VideoCaptureDevice GetCurrentCamera()
+        public void SelectCamera(int cameraIndex)
         {
-            return videoSource;
-        }
+            if (cameraIndex < 0 || cameraIndex >= AvailableCameras.Count)
+                throw new ArgumentException("无效的摄像头索引");
 
-        // 启动相机预览（通过 NewFrame 事件返回图像）
-        public void StartCamera(NewFrameEventHandler frameHandler)
-        {
-            if (videoSource != null)
+            StopCamera();
+            _selectedCameraIndex = cameraIndex;
+            DeviceName = AvailableCameras[cameraIndex];
+
+            // 获取设备支持的分辨率
+            InitializeResolutions();
+
+            // 使用DirectShow后端初始化摄像头
+            _videoCapture = new VideoCapture(cameraIndex, VideoCaptureAPIs.DSHOW);
+
+            // 尝试设置最高分辨率（可选）
+            if (AvailableResolutions.Count > 0)
             {
-                videoSource.NewFrame += frameHandler;
-                videoSource.Start();
+                var maxRes = AvailableResolutions[0];
+                _videoCapture.Set(VideoCaptureProperties.FrameWidth, maxRes.Width);
+                _videoCapture.Set(VideoCaptureProperties.FrameHeight, maxRes.Height);
             }
+
+            // 更新当前分辨率
+            _frameSize = new Size(
+                (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth),
+                (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight)
+            );
         }
 
-        // 请求捕获当前帧图像
-        public void CaptureCurrentFrame()
+        private void InitializeResolutions()
         {
-            isCaptureRequested = true;
-        }
-        // 返回当前帧图像
-        public Bitmap GetCurrentFrame()
-        {
-            return currentFrame;
-        }
-        // 新帧事件处理方法：更新 currentFrame，并在请求捕获时保存图像
-        public void CaptureImage(object sender, NewFrameEventArgs eventArgs)
-        {
-            // 释放之前的帧
-            currentFrame?.Dispose();
-            // 克隆新帧
-            currentFrame = (Bitmap)eventArgs.Frame.Clone();
+            AvailableResolutions.Clear();
 
-            // 判断是否请求捕获
-            if (isCaptureRequested)
+            DsDevice[] devices = DsDevice.GetDevicesOfCat(FilterCategory.VideoInputDevice);
+            if (_selectedCameraIndex >= devices.Length)
             {
-                // 重置捕获请求标志
-                isCaptureRequested = false;
+                OnErrorOccurred("选中的摄像头索引无效。");
+                return;
+            }
 
-                // 为避免当前帧后续修改影响保存结果，复制一份
-                Bitmap capturedFrame = (Bitmap)currentFrame.Clone();
+            DsDevice device = devices[_selectedCameraIndex];
+            object sourceObj = null;
+            IAMStreamConfig streamConfig = null;
 
-                // 构造文件名（注意：确保 "/input" 路径存在并具备写权限）
-                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                string fileName = $"CapturedImage_{timestamp}.jpg";
+            try
+            {
+                // 创建设备的Filter
+                Guid iid = typeof(IBaseFilter).GUID;
+                device.Mon.BindToObject(null, null, ref iid, out sourceObj);
+                IBaseFilter filter = (IBaseFilter)sourceObj;
 
-                //保存问题
-                string folderPath = Path.Combine(Application.StartupPath, "input");
-                if (!Directory.Exists(folderPath))
+                // 获取输出Pin
+                IPin pin = DsFindPin.ByDirection(filter, PinDirection.Output, 0);
+                if (pin == null)
                 {
-                    Directory.CreateDirectory(folderPath);
+                    OnErrorOccurred("无法找到输出Pin。");
+                    return;
                 }
-                string savePath = Path.Combine(folderPath, fileName);
-                capturedFrame.Save(savePath, ImageFormat.Jpeg);
-                // 保存图像为 JPEG 格式
+
+                // 获取IAMStreamConfig接口
+                streamConfig = pin as IAMStreamConfig;
+                if (streamConfig == null)
+                {
+                    OnErrorOccurred("设备不支持流配置接口。");
+                    return;
+                }
+
+                // 获取能力数量
+                int count, size;
+                int hr = streamConfig.GetNumberOfCapabilities(out count, out size);
+                if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+
+                IntPtr capsPtr = Marshal.AllocCoTaskMem(size);
+                HashSet<Size> uniqueResolutions = new HashSet<Size>();
+
                 try
                 {
-                    capturedFrame.Save(savePath, ImageFormat.Jpeg);
-                }
-                catch (ExternalException ex)
-                {
-                    MessageBox.Show("保存图像错误: " + ex.Message);
-                }
-                // 释放之前的帧
-                capturedFrame?.Dispose();
-                // 如果在非UI线程调用 MessageBox.Show，可能需要调度到UI线程（示例中直接调用）
-                MessageBox.Show("图片已保存至：" + savePath);
+                    for (int i = 0; i < count; i++)
+                    {
+                        AMMediaType mediaType = null;
+                        try
+                        {
+                            hr = streamConfig.GetStreamCaps(i, out mediaType, capsPtr);
+                            if (hr != 0) continue;
 
-                // 根据需求，可在这里对 capturedFrame 做进一步处理，或者释放它
+                            if (mediaType.formatType == FormatType.VideoInfo)
+                            {
+                                VideoInfoHeader videoInfo = (VideoInfoHeader)Marshal.PtrToStructure(
+                                    mediaType.formatPtr, typeof(VideoInfoHeader));
+                                Size res = new Size(videoInfo.BmiHeader.Width, videoInfo.BmiHeader.Height);
+                                uniqueResolutions.Add(res);
+                            }
+                        }
+                        finally
+                        {
+                            if (mediaType != null) DsUtils.FreeAMMediaType(mediaType);
+                        }
+                    }
+
+                    AvailableResolutions.AddRange(uniqueResolutions
+                        .OrderByDescending(s => s.Width)
+                        .ThenByDescending(s => s.Height));
+                }
+                finally
+                {
+                    Marshal.FreeCoTaskMem(capsPtr);
+                }
+            }
+            catch (Exception ex)
+            {
+                OnErrorOccurred($"获取分辨率失败: {ex.Message}");
+                // 添加默认回退分辨率
+                if (AvailableResolutions.Count == 0)
+                {
+                    AvailableResolutions.Add(new Size(
+                        (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth),
+                        (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight)));
+                }
+            }
+            finally
+            {
+                if (streamConfig != null) Marshal.ReleaseComObject(streamConfig);
+                if (sourceObj != null) Marshal.ReleaseComObject(sourceObj);
             }
         }
 
-        // 停止相机预览
+        public void StartPreview()
+        {
+            if (_videoCapture == null || !_videoCapture.IsOpened())
+                throw new InvalidOperationException("摄像头未初始化");
+
+            if (_isRunning) return;
+
+            _isRunning = true;
+            _captureThread = new Thread(CaptureLoop)
+            {
+                IsBackground = true
+            };
+            _captureThread.Start();
+        }
+
+        private void CaptureLoop()
+        {
+            while (_isRunning)
+            {
+                try
+                {
+                    using (var frame = new Mat()) // 使用 using 确保 Mat 释放
+                    {
+                        if (_videoCapture.Read(frame) && !frame.Empty())
+                        {
+                            _currentFrame?.Dispose();
+                            _currentFrame = frame.Clone();
+                            _frameSize = new Size(frame.Width, frame.Height);
+
+                            using (var bitmap = BitmapConverter.ToBitmap(frame))
+                            {
+                                var clonedBitmap = (Bitmap)bitmap.Clone();
+                                FrameUpdated?.Invoke(this, clonedBitmap);
+                            }
+                        }
+                    }
+                    Thread.Sleep(33);
+                }
+                catch (Exception ex)
+                {
+                    OnErrorOccurred($"捕获错误: {ex.Message}");
+                    _isRunning = false;
+                }
+            }
+        }
+
+        //public void StopCamera()
+        //{
+        //    _isRunning = false;
+        //     _captureThread?.Join(1000);
+        //    _videoCapture?.Release();
+        //    _videoCapture = null;     // 将引用置空
+        //}
         public void StopCamera()
         {
-            if (videoSource != null && videoSource.IsRunning)
+            _isRunning = false;
+
+            // 停止捕获线程
+            if (_captureThread != null && _captureThread.IsAlive)
             {
-                videoSource.SignalToStop();
-                videoSource.WaitForStop();
+                if (!_captureThread.Join(2000))
+                {
+                    try { _captureThread.Interrupt(); }
+                    catch { /* Ignore thread state exceptions */ }
+                }
+            }
+
+            // 仅释放当前帧，保留摄像头实例
+            _currentFrame?.Dispose();
+            _currentFrame = null;
+        }
+
+        public void SetResolution(Size resolution)
+        {
+            if (!AvailableResolutions.Contains(resolution))
+                throw new ArgumentException("不支持的分辨率");
+
+            bool wasRunning = IsPreviewing;
+
+            try
+            {
+                if (wasRunning)
+                    StopCamera();
+
+                _videoCapture.Set(VideoCaptureProperties.FrameWidth, resolution.Width);
+                _videoCapture.Set(VideoCaptureProperties.FrameHeight, resolution.Height);
+
+                // 验证分辨率设置
+                double actualWidth = _videoCapture.Get(VideoCaptureProperties.FrameWidth);
+                double actualHeight = _videoCapture.Get(VideoCaptureProperties.FrameHeight);
+
+                if (actualWidth != resolution.Width || actualHeight != resolution.Height)
+                    throw new ArgumentException("分辨率设置失败");
+
+                _frameSize = resolution;
+
+            }
+            catch (Exception ex)
+            {
+                OnErrorOccurred($"分辨率设置失败: {ex.Message}");
+            }
+            finally
+            {
+                if (wasRunning)
+                    StartPreview();
             }
         }
 
-        // 设置相机参数示例：以“Resolution”为例，根据传入的分辨率索引来设置视频参数
-        // value 应为 int 类型的索引
-        public bool SetParameter(string paramName, object value)
+        public void CaptureFrame()
         {
-            if (videoSource == null)
-                return false;
-
-            if (paramName == "Resolution")
+            try
             {
-                int index = Convert.ToInt32(value);
-                VideoCapabilities[] capabilities = videoSource.VideoCapabilities;
-                if (capabilities != null && index >= 0 && index < capabilities.Length)
+                if (_currentFrame == null || _currentFrame.Empty()) return;
+
+                var savePath = GetUniqueFilePath();
+                using (var bitmap = BitmapConverter.ToBitmap(_currentFrame))
                 {
-                    videoSource.VideoResolution = capabilities[index];
-                    return true;
+                    EnsureDirectoryExists(savePath);
+                    bitmap.Save(savePath, ImageFormat.Jpeg);
+                }
+                CaptureCompleted?.Invoke(this, savePath);
+            }
+            catch (Exception ex)
+            {
+                OnErrorOccurred($"捕获失败: {ex.Message}");
+            }
+        }
+
+        private static string GetUniqueFilePath()
+        {
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                "input", $"Capture_{timestamp}.jpg");
+        }
+
+        private static void EnsureDirectoryExists(string filePath)
+        {
+            var directory = Path.GetDirectoryName(filePath);
+            Directory.CreateDirectory(directory);
+        }
+
+        private void OnErrorOccurred(string message)
+        {
+            ErrorOccurred?.Invoke(this, message);
+        }
+
+        public void Dispose()
+        {
+            if (_isDisposed) return;
+
+            _isRunning = false;
+            //_captureThread?.Join(1000);
+            if (_captureThread != null && _captureThread.IsAlive)
+            {
+                if (!_captureThread.Join(2000))
+                {
+                    _captureThread.Interrupt();
                 }
             }
-            // 可根据需要扩展其他参数
-            return false;
+
+            _currentFrame?.Dispose();
+            _videoCapture?.Dispose();
+            _videoCapture = null;
+            _currentFrame = null;
+
+            _isDisposed = true;
+            GC.SuppressFinalize(this);
+        }
+
+        ~CameraController()
+        {
+            Dispose();
         }
     }
 }
