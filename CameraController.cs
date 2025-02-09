@@ -31,7 +31,6 @@ namespace RoboVision
         public string DeviceName { get; private set; } = "未选择设备";
         public bool IsPreviewing => _isRunning;
         public Size CurrentResolution => _frameSize;
-
         public CameraController()
         {
             RefreshDevices();
@@ -135,19 +134,22 @@ namespace RoboVision
             {
                 try
                 {
-                    var frame = new Mat();
-                    if (_videoCapture.Read(frame) && !frame.Empty())
+                    using (var frame = new Mat()) // 使用 using 确保 Mat 释放
                     {
-                        _currentFrame?.Dispose();
-                        _currentFrame = frame.Clone();
-                        _frameSize = new Size(frame.Width, frame.Height);
-
-                        using (var bitmap = BitmapConverter.ToBitmap(frame))
+                        if (_videoCapture.Read(frame) && !frame.Empty())
                         {
-                            FrameUpdated?.Invoke(this, (Bitmap)bitmap.Clone());
+                            _currentFrame?.Dispose();
+                            _currentFrame = frame.Clone();
+                            _frameSize = new Size(frame.Width, frame.Height);
+
+                            using (var bitmap = BitmapConverter.ToBitmap(frame))
+                            {
+                                var clonedBitmap = (Bitmap)bitmap.Clone();
+                                FrameUpdated?.Invoke(this, clonedBitmap);
+                            }
                         }
                     }
-                    Thread.Sleep(33); // ~30fps
+                    Thread.Sleep(33);
                 }
                 catch (Exception ex)
                 {

@@ -204,11 +204,18 @@ namespace RoboVision
 
             Task.Run(() =>
             {
-                var result = _dlModel.ProcessFrame(frame);
-                if (result != null)
+                using (frame) // 使用 using 确保释放
                 {
-                    UpdateProcessedImage(result.ProcessedImage);
-                    SendDetectionResults(result.Detections);
+                    var result = _dlModel.ProcessFrame(frame);
+                    if (result != null)
+                    {
+                        // 确保 ProcessedImage 在必要时释放
+                        using (var processedImage = result.ProcessedImage)
+                        {
+                            UpdateProcessedImage(processedImage);
+                        }
+                        SendDetectionResults(result.Detections);
+                    }
                 }
             });
         }
@@ -229,15 +236,28 @@ namespace RoboVision
         {
             SafeInvoke(() =>
             {
-                if (frame == null || frame.Width <= 0 || frame.Height <= 0)
+                if (frame == null)
                     return;
+
+                // 检查 Bitmap 是否已被释放（通过异常捕获）
+                try
+                {
+                    if (frame.Width <= 0 || frame.Height <= 0)
+                        return;
+                }
+                catch (ArgumentException)
+                {
+                    return; // 如果已释放，直接返回
+                }
 
                 lock (_imageLock)
                 {
                     var old = pictureBoxDisplay.Image;
-                    pictureBoxDisplay.Image = new Bitmap(frame);
-                    old?.Dispose();
+                    pictureBoxDisplay.Image = new Bitmap(frame); // 创建独立副本
+                    old?.Dispose(); // 释放旧图像
                 }
+
+                frame?.Dispose(); // 安全释放传入的 Bitmap
             });
         }
 
