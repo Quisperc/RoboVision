@@ -1,10 +1,10 @@
 ﻿// ======================== 深度学习模块 DeepLearningModule.cs ========================
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
-using Microsoft.ML.OnnxRuntime;
-using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace RoboVision
 {

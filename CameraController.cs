@@ -1,20 +1,18 @@
 ﻿// CameraController.cs
+using DirectShowLib;
+using OpenCvSharp;
+using OpenCvSharp.Extensions;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
-using OpenCvSharp;
-using OpenCvSharp.Extensions;
-using System.Threading;
-using Size = System.Drawing.Size;
-using DirectShowLib;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using FormatType = DirectShowLib.FormatType;
-using System.Net.Http;
-using System.Windows.Forms;
+using Size = System.Drawing.Size;
 
 namespace RoboVision
 {
