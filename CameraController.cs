@@ -10,6 +10,11 @@ using OpenCvSharp.Extensions;
 using System.Threading;
 using Size = System.Drawing.Size;
 using DirectShowLib;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using FormatType = DirectShowLib.FormatType;
+using System.Net.Http;
+using System.Windows.Forms;
 
 namespace RoboVision
 {
@@ -21,6 +26,9 @@ namespace RoboVision
         private bool _isRunning;
         private bool _isDisposed;
         private Size _frameSize;
+
+        private int _selectedCameraIndex;
+
 
         public event EventHandler<Bitmap> FrameUpdated;
         public event EventHandler<string> CaptureCompleted;
@@ -38,6 +46,9 @@ namespace RoboVision
 
         public void RefreshDevices()
         {
+            _videoCapture?.Dispose();
+            _videoCapture = null;
+            _videoCapture = new VideoCapture();
             AvailableCameras.Clear();
             try
             {
@@ -48,9 +59,11 @@ namespace RoboVision
                     AvailableCameras.Add(device.Name);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // 回退方法
+                // 记录错误但不要吞掉异常
+                Debug.WriteLine($"DirectShow设备枚举失败: {ex.Message}");
+                // 回退方法需要明确说明索引不可靠
                 for (int i = 0; i < 10; i++)
                 {
                     using (var testCapture = new VideoCapture(i, VideoCaptureAPIs.DSHOW))
@@ -71,45 +84,124 @@ namespace RoboVision
                 throw new ArgumentException("无效的摄像头索引");
 
             StopCamera();
-
-            // 使用 DirectShow 后端打开摄像头
-            _videoCapture = new VideoCapture(cameraIndex, VideoCaptureAPIs.DSHOW);
+            _selectedCameraIndex = cameraIndex;
             DeviceName = AvailableCameras[cameraIndex];
+
+            // 获取设备支持的分辨率
             InitializeResolutions();
+
+            // 使用DirectShow后端初始化摄像头
+            _videoCapture = new VideoCapture(cameraIndex, VideoCaptureAPIs.DSHOW);
+
+            // 尝试设置最高分辨率（可选）
+            if (AvailableResolutions.Count > 0)
+            {
+                var maxRes = AvailableResolutions[0];
+                _videoCapture.Set(VideoCaptureProperties.FrameWidth, maxRes.Width);
+                _videoCapture.Set(VideoCaptureProperties.FrameHeight, maxRes.Height);
+            }
+
+            // 更新当前分辨率
+            _frameSize = new Size(
+                (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth),
+                (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight)
+            );
         }
 
         private void InitializeResolutions()
         {
             AvailableResolutions.Clear();
-            var standardResolutions = new List<Size>
+
+            DsDevice[] devices = DsDevice.GetDevicesOfCat(FilterCategory.VideoInputDevice);
+            if (_selectedCameraIndex >= devices.Length)
             {
-                new Size(1920, 1080),
-                new Size(1280, 720),
-                new Size(800, 600),
-                new Size(640, 480),
-                new Size(320, 240)
-            };
-
-            foreach (var res in standardResolutions)
-            {
-                _videoCapture.Set(VideoCaptureProperties.FrameWidth, res.Width);
-                _videoCapture.Set(VideoCaptureProperties.FrameHeight, res.Height);
-
-                var actualWidth = _videoCapture.Get(VideoCaptureProperties.FrameWidth);
-                var actualHeight = _videoCapture.Get(VideoCaptureProperties.FrameHeight);
-
-                if (actualWidth == res.Width && actualHeight == res.Height)
-                {
-                    AvailableResolutions.Add(res);
-                }
+                OnErrorOccurred("选中的摄像头索引无效。");
+                return;
             }
 
-            if (!AvailableResolutions.Any())
+            DsDevice device = devices[_selectedCameraIndex];
+            object sourceObj = null;
+            IAMStreamConfig streamConfig = null;
+
+            try
             {
-                AvailableResolutions.Add(new Size(
-                    (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth),
-                    (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight)
-                ));
+                // 创建设备的Filter
+                Guid iid = typeof(IBaseFilter).GUID;
+                device.Mon.BindToObject(null, null, ref iid, out sourceObj);
+                IBaseFilter filter = (IBaseFilter)sourceObj;
+
+                // 获取输出Pin
+                IPin pin = DsFindPin.ByDirection(filter, PinDirection.Output, 0);
+                if (pin == null)
+                {
+                    OnErrorOccurred("无法找到输出Pin。");
+                    return;
+                }
+
+                // 获取IAMStreamConfig接口
+                streamConfig = pin as IAMStreamConfig;
+                if (streamConfig == null)
+                {
+                    OnErrorOccurred("设备不支持流配置接口。");
+                    return;
+                }
+
+                // 获取能力数量
+                int count, size;
+                int hr = streamConfig.GetNumberOfCapabilities(out count, out size);
+                if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+
+                IntPtr capsPtr = Marshal.AllocCoTaskMem(size);
+                HashSet<Size> uniqueResolutions = new HashSet<Size>();
+
+                try
+                {
+                    for (int i = 0; i < count; i++)
+                    {
+                        AMMediaType mediaType = null;
+                        try
+                        {
+                            hr = streamConfig.GetStreamCaps(i, out mediaType, capsPtr);
+                            if (hr != 0) continue;
+
+                            if (mediaType.formatType == FormatType.VideoInfo)
+                            {
+                                VideoInfoHeader videoInfo = (VideoInfoHeader)Marshal.PtrToStructure(
+                                    mediaType.formatPtr, typeof(VideoInfoHeader));
+                                Size res = new Size(videoInfo.BmiHeader.Width, videoInfo.BmiHeader.Height);
+                                uniqueResolutions.Add(res);
+                            }
+                        }
+                        finally
+                        {
+                            if (mediaType != null) DsUtils.FreeAMMediaType(mediaType);
+                        }
+                    }
+
+                    AvailableResolutions.AddRange(uniqueResolutions
+                        .OrderByDescending(s => s.Width)
+                        .ThenByDescending(s => s.Height));
+                }
+                finally
+                {
+                    Marshal.FreeCoTaskMem(capsPtr);
+                }
+            }
+            catch (Exception ex)
+            {
+                OnErrorOccurred($"获取分辨率失败: {ex.Message}");
+                // 添加默认回退分辨率
+                if (AvailableResolutions.Count == 0)
+                {
+                    AvailableResolutions.Add(new Size(
+                        (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth),
+                        (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight)));
+                }
+            }
+            finally
+            {
+                if (streamConfig != null) Marshal.ReleaseComObject(streamConfig);
+                if (sourceObj != null) Marshal.ReleaseComObject(sourceObj);
             }
         }
 
@@ -159,11 +251,30 @@ namespace RoboVision
             }
         }
 
+        //public void StopCamera()
+        //{
+        //    _isRunning = false;
+        //     _captureThread?.Join(1000);
+        //    _videoCapture?.Release();
+        //    _videoCapture = null;     // 将引用置空
+        //}
         public void StopCamera()
         {
             _isRunning = false;
-            _captureThread?.Join(1000);
-            //_videoCapture?.Release();
+
+            // 停止捕获线程
+            if (_captureThread != null && _captureThread.IsAlive)
+            {
+                if (!_captureThread.Join(2000))
+                {
+                    try { _captureThread.Interrupt(); }
+                    catch { /* Ignore thread state exceptions */ }
+                }
+            }
+
+            // 仅释放当前帧，保留摄像头实例
+            _currentFrame?.Dispose();
+            _currentFrame = null;
         }
 
         public void SetResolution(Size resolution)
@@ -189,6 +300,11 @@ namespace RoboVision
                     throw new ArgumentException("分辨率设置失败");
 
                 _frameSize = resolution;
+
+            }
+            catch (Exception ex)
+            {
+                OnErrorOccurred($"分辨率设置失败: {ex.Message}");
             }
             finally
             {
@@ -240,10 +356,19 @@ namespace RoboVision
             if (_isDisposed) return;
 
             _isRunning = false;
-            _captureThread?.Join(1000);
+            //_captureThread?.Join(1000);
+            if (_captureThread != null && _captureThread.IsAlive)
+            {
+                if (!_captureThread.Join(2000))
+                {
+                    _captureThread.Interrupt();
+                }
+            }
 
             _currentFrame?.Dispose();
             _videoCapture?.Dispose();
+            _videoCapture = null;
+            _currentFrame = null;
 
             _isDisposed = true;
             GC.SuppressFinalize(this);

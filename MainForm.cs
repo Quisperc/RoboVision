@@ -167,6 +167,7 @@ namespace RoboVision
             {
                 // 这里会调用我们新增的System.Drawing.Size参数重载方法
                 _camera.SetResolution(paramForm.SelectedResolution);
+
                 StartPreview();
                 ShowMessage($"当前分辨率：{_camera.CurrentResolution}");
             }
@@ -345,6 +346,4 @@ namespace RoboVision
         }
         #endregion
     }
-
-    // 保持其他辅助类（CameraSelection, ParameterInputForm）不变
 }
