@@ -2,7 +2,7 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
-using OpenCvSharp;// 没用上
+using OpenCvSharp;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
