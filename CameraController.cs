@@ -8,9 +8,8 @@ using System.Linq;
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
 using System.Threading;
-using DirectShowLib;
 using Size = System.Drawing.Size;
-using AForge.Video.DirectShow;
+using DirectShowLib;
 
 namespace RoboVision
 {
@@ -43,8 +42,8 @@ namespace RoboVision
             AvailableCameras.Clear();
             try
             {
-                // 使用DirectShow获取摄像头设备
-                DsDevice[] devices = DsDevice.GetDevicesOfCat(DirectShowLib.FilterCategory.VideoInputDevice);
+                // 使用 DirectShow 获取设备名称
+                DsDevice[] devices = DsDevice.GetDevicesOfCat(FilterCategory.VideoInputDevice);
                 foreach (DsDevice device in devices)
                 {
                     AvailableCameras.Add(device.Name);
@@ -52,10 +51,10 @@ namespace RoboVision
             }
             catch
             {
-                // 回退到旧方法（如果DirectShow不可用）
+                // 回退方法
                 for (int i = 0; i < 10; i++)
                 {
-                    using (var testCapture = new VideoCapture(i))
+                    using (var testCapture = new VideoCapture(i, VideoCaptureAPIs.DSHOW))
                     {
                         if (testCapture.IsOpened())
                         {
@@ -74,7 +73,8 @@ namespace RoboVision
 
             StopCamera();
 
-            _videoCapture = new VideoCapture(cameraIndex);
+            // 使用 DirectShow 后端打开摄像头
+            _videoCapture = new VideoCapture(cameraIndex, VideoCaptureAPIs.DSHOW);
             DeviceName = AvailableCameras[cameraIndex];
             InitializeResolutions();
         }
@@ -161,7 +161,7 @@ namespace RoboVision
         {
             _isRunning = false;
             _captureThread?.Join(1000);
-            _videoCapture?.Release();
+            //_videoCapture?.Release();
         }
 
         public void SetResolution(Size resolution)
@@ -169,9 +169,30 @@ namespace RoboVision
             if (!AvailableResolutions.Contains(resolution))
                 throw new ArgumentException("不支持的分辨率");
 
-            _videoCapture.Set(VideoCaptureProperties.FrameWidth, resolution.Width);
-            _videoCapture.Set(VideoCaptureProperties.FrameHeight, resolution.Height);
-            _frameSize = resolution;
+            bool wasRunning = IsPreviewing;
+
+            try
+            {
+                if (wasRunning)
+                    StopCamera();
+
+                _videoCapture.Set(VideoCaptureProperties.FrameWidth, resolution.Width);
+                _videoCapture.Set(VideoCaptureProperties.FrameHeight, resolution.Height);
+
+                // 验证分辨率设置
+                double actualWidth = _videoCapture.Get(VideoCaptureProperties.FrameWidth);
+                double actualHeight = _videoCapture.Get(VideoCaptureProperties.FrameHeight);
+
+                if (actualWidth != resolution.Width || actualHeight != resolution.Height)
+                    throw new ArgumentException("分辨率设置失败");
+
+                _frameSize = resolution;
+            }
+            finally
+            {
+                if (wasRunning)
+                    StartPreview();
+            }
         }
 
         public void CaptureFrame()
@@ -216,7 +237,9 @@ namespace RoboVision
         {
             if (_isDisposed) return;
 
-            StopCamera();
+            _isRunning = false;
+            _captureThread?.Join(1000);
+
             _currentFrame?.Dispose();
             _videoCapture?.Dispose();
 

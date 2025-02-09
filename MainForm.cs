@@ -149,7 +149,7 @@ namespace RoboVision
                 {
                     _camera.SelectCamera(csForm.SelectedCameraIndex);
                     UpdateStatus($"已连接 - {_camera.DeviceName}");
-                    ShowResolutionOptions();
+                    //ShowResolutionOptions();
                 }
             }
             catch (Exception ex)

@@ -8,7 +8,7 @@ namespace RoboVision
 {
     public partial class CameraSelection : Form
     {
-        public int SelectedCameraIndex { get; private set; } = -1;
+        public int SelectedCameraIndex { get; private set; } = 1;
 
         public CameraSelection(IEnumerable<string> cameras)
         {
