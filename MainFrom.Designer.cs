@@ -2,7 +2,7 @@
 
 namespace RoboVision
 {
-    partial class MainForm
+    partial class MainFrom
     {
         #region Windows 窗体设计器生成的代码
 
