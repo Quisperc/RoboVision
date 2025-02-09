@@ -169,7 +169,7 @@ namespace RoboVision
             this.Controls.Add(this.labelCurrentCamera);
             this.Name = "MainFrom";
             this.Text = "机器人拆垛码垛系统";
-            this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.MainForm_FormClosing);
+            //this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.MainForm_FormClosing);
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxDisplay)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
             this.ResumeLayout(false);
