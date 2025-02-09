@@ -8,7 +8,9 @@ using System.Linq;
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
 using System.Threading;
+using DirectShowLib;
 using Size = System.Drawing.Size;
+using AForge.Video.DirectShow;
 
 namespace RoboVision
 {
@@ -39,14 +41,27 @@ namespace RoboVision
         public void RefreshDevices()
         {
             AvailableCameras.Clear();
-            for (int i = 0; i < 10; i++)
+            try
             {
-                using (var testCapture = new VideoCapture(i))
+                // 使用DirectShow获取摄像头设备
+                DsDevice[] devices = DsDevice.GetDevicesOfCat(DirectShowLib.FilterCategory.VideoInputDevice);
+                foreach (DsDevice device in devices)
                 {
-                    if (testCapture.IsOpened())
+                    AvailableCameras.Add(device.Name);
+                }
+            }
+            catch
+            {
+                // 回退到旧方法（如果DirectShow不可用）
+                for (int i = 0; i < 10; i++)
+                {
+                    using (var testCapture = new VideoCapture(i))
                     {
-                        AvailableCameras.Add($"摄像头 {i + 1}");
-                        testCapture.Release();
+                        if (testCapture.IsOpened())
+                        {
+                            AvailableCameras.Add($"摄像头 {i + 1}");
+                            testCapture.Release();
+                        }
                     }
                 }
             }
