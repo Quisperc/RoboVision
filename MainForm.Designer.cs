@@ -31,7 +31,7 @@ namespace RoboVision
         private System.Windows.Forms.Button btnProcess;
         private System.Windows.Forms.PictureBox pictureBoxDisplay;
         private System.Windows.Forms.Label labelStatus;
-        private System.Windows.Forms.TextBox textBoxCoordinates;
+        private System.Windows.Forms.RichTextBox textBoxCoordinates;
         private System.Windows.Forms.Label labelCurrentCamera;
 
         /// <summary>
@@ -61,11 +61,11 @@ namespace RoboVision
             this.btnProcess = new System.Windows.Forms.Button();
             this.pictureBoxDisplay = new System.Windows.Forms.PictureBox();
             this.labelStatus = new System.Windows.Forms.Label();
-            this.textBoxCoordinates = new System.Windows.Forms.TextBox();
+            this.textBoxCoordinates = new System.Windows.Forms.RichTextBox();
             this.labelCurrentCamera = new System.Windows.Forms.Label();
-            this.pictureBox1 = new System.Windows.Forms.PictureBox();
+            this.pictureBoxProcessed = new System.Windows.Forms.PictureBox();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxDisplay)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBoxProcessed)).BeginInit();
             this.SuspendLayout();
             // 
             // btnDetectCamera
@@ -129,12 +129,12 @@ namespace RoboVision
             // 
             // textBoxCoordinates
             // 
-            this.textBoxCoordinates.Location = new System.Drawing.Point(20, 232);
-            this.textBoxCoordinates.Multiline = true;
+            this.textBoxCoordinates.Location = new System.Drawing.Point(27, 520);
             this.textBoxCoordinates.Name = "textBoxCoordinates";
-            this.textBoxCoordinates.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.textBoxCoordinates.Size = new System.Drawing.Size(120, 100);
+            this.textBoxCoordinates.ScrollBars = System.Windows.Forms.RichTextBoxScrollBars.Vertical;
+            this.textBoxCoordinates.Size = new System.Drawing.Size(1419, 220);
             this.textBoxCoordinates.TabIndex = 6;
+            this.textBoxCoordinates.Text = "";
             // 
             // labelCurrentCamera
             // 
@@ -145,20 +145,20 @@ namespace RoboVision
             this.labelCurrentCamera.TabIndex = 7;
             this.labelCurrentCamera.Text = "当前相机：未选择";
             // 
-            // pictureBox1
+            // pictureBoxProcessed
             // 
-            this.pictureBox1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.pictureBox1.Location = new System.Drawing.Point(806, 20);
-            this.pictureBox1.Name = "pictureBox1";
-            this.pictureBox1.Size = new System.Drawing.Size(640, 480);
-            this.pictureBox1.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
-            this.pictureBox1.TabIndex = 8;
-            this.pictureBox1.TabStop = false;
+            this.pictureBoxProcessed.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.pictureBoxProcessed.Location = new System.Drawing.Point(806, 20);
+            this.pictureBoxProcessed.Name = "pictureBoxProcessed";
+            this.pictureBoxProcessed.Size = new System.Drawing.Size(640, 480);
+            this.pictureBoxProcessed.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
+            this.pictureBoxProcessed.TabIndex = 8;
+            this.pictureBoxProcessed.TabStop = false;
             // 
-            // MainFrom
+            // MainForm
             // 
-            this.ClientSize = new System.Drawing.Size(1466, 520);
-            this.Controls.Add(this.pictureBox1);
+            this.ClientSize = new System.Drawing.Size(1466, 752);
+            this.Controls.Add(this.pictureBoxProcessed);
             this.Controls.Add(this.textBoxCoordinates);
             this.Controls.Add(this.labelStatus);
             this.Controls.Add(this.pictureBoxDisplay);
@@ -167,11 +167,10 @@ namespace RoboVision
             this.Controls.Add(this.btnSetParameters);
             this.Controls.Add(this.btnDetectCamera);
             this.Controls.Add(this.labelCurrentCamera);
-            this.Name = "MainFrom";
+            this.Name = "MainForm";
             this.Text = "机器人拆垛码垛系统";
-            //this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.MainForm_FormClosing);
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxDisplay)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBoxProcessed)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -179,7 +178,7 @@ namespace RoboVision
 
         #endregion
 
-        private PictureBox pictureBox1;
+        private PictureBox pictureBoxProcessed;
     }
 }
 

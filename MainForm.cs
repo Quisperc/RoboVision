@@ -1,4 +1,5 @@
 ﻿// MainForm.cs
+using OpenCvSharp;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -48,6 +49,7 @@ namespace RoboVision
             // 深度学习事件
             _dlModel.ModelLoaded += DlModel_ModelLoaded;
             _dlModel.InferenceCompleted += DlModel_InferenceCompleted;
+            _dlModel.ProceedCompleted += Deeplearning_ProceedCompleted;
             _dlModel.ErrorOccurred += DlModel_ErrorOccurred;
 
             // 通信事件
@@ -64,26 +66,34 @@ namespace RoboVision
         private void Camera_CaptureCompleted(object sender, string savePath)
         {
             ShowMessage($"图片已保存至：{savePath}");
+            LogData($"图片已保存至：{savePath}");
+        }
+        // 处理图像文件保存完成事件
+        private void Deeplearning_ProceedCompleted(object sender, string savePath)
+        {
+            ShowMessage($"图片已保存至：{savePath}");
+            LogData($"图片已保存至：{savePath}");
         }
 
         private void Camera_ErrorOccurred(object sender, string error)
         {
-            HandleError($"相机错误：{error}");
+            HandleError($"相机错误：{error}", false);
         }
 
         private void DlModel_ModelLoaded(object sender, string msg)
         {
-            UpdateStatus($"模型加载：{msg}");
+            UpdateStatus($"模型加载：{msg}", false);
         }
 
         private void DlModel_InferenceCompleted(object sender, string msg)
         {
-            UpdateStatus(msg);
+            UpdateStatus(msg, false);
         }
 
         private void DlModel_ErrorOccurred(object sender, string msg)
         {
-            HandleError($"模型错误：{msg}");
+            HandleError($"模型错误：{msg}", false);
+            LogData($"模型错误：{msg}");
         }
 
         private void Comms_DataReceived(object sender, string data)
@@ -93,7 +103,7 @@ namespace RoboVision
 
         private void Comms_StatusChanged(object sender, string msg)
         {
-            UpdateStatus($"通信状态：{msg}");
+            UpdateStatus($"通信状态：{msg}", false);
         }
         #endregion
 
@@ -147,13 +157,13 @@ namespace RoboVision
                 if (csForm.ShowDialog() == DialogResult.OK)
                 {
                     _camera.SelectCamera(csForm.SelectedCameraIndex);
-                    UpdateStatus($"已连接 - {_camera.DeviceName}");
+                    UpdateStatus($"已连接 - {_camera.DeviceName}", true);
                     //ShowResolutionOptions();
                 }
             }
             catch (Exception ex)
             {
-                HandleError($"相机初始化失败：{ex.Message}");
+                HandleError($"相机初始化失败：{ex.Message}", false);
             }
         }
 
@@ -177,11 +187,11 @@ namespace RoboVision
             try
             {
                 _camera.StartPreview();
-                UpdateStatus($"实时预览中 - {_camera.CurrentResolution}");
+                UpdateStatus($"实时预览中 - {_camera.CurrentResolution}", true);
             }
             catch (Exception ex)
             {
-                HandleError(ex.Message);
+                HandleError(ex.Message, false);
             }
         }
 
@@ -193,28 +203,28 @@ namespace RoboVision
             }
             catch (Exception ex)
             {
-                HandleError(ex.Message);
+                HandleError(ex.Message, false);
             }
         }
 
         private void ProcessCurrentFrame()
         {
-            var frame = GetCurrentFrame();
-            if (frame == null) return;
-
             Task.Run(() =>
             {
-                using (frame) // 使用 using 确保释放
+                using (var frame = GetCurrentFrame())
                 {
                     var result = _dlModel.ProcessFrame(frame);
                     if (result != null)
                     {
-                        // 确保 ProcessedImage 在必要时释放
-                        using (var processedImage = result.ProcessedImage)
+                        // 创建需要显示的图像副本
+                        if(result.ProcessedImage==null)
                         {
-                            UpdateProcessedImage(processedImage);
+                            ShowMessage("处理后的图像为空");
+                            return;
                         }
+                        var displayImage = new Bitmap(result.ProcessedImage);
                         SendDetectionResults(result.Detections);
+                        UpdateProcessedImage(displayImage);
                     }
                 }
             });
@@ -267,9 +277,9 @@ namespace RoboVision
             {
                 lock (_imageLock)
                 {
-                    var old = pictureBoxDisplay.Image;
-                    pictureBoxDisplay.Image = new Bitmap(image);
-                    old?.Dispose();
+                    var old = pictureBoxProcessed.Image;
+                    pictureBoxProcessed.Image = image; // 直接使用传入的Bitmap
+                    old?.Dispose(); // 安全释放旧图像
                 }
             });
         }
@@ -284,14 +294,56 @@ namespace RoboVision
             _comms.SendToClient("127.0.0.1", 8000, sb.ToString());
         }
 
-        private void UpdateStatus(string message)
+        private void UpdateStatus(string message, bool status)
         {
-            SafeInvoke(() => labelStatus.Text = message);
+            if(status)
+                SafeInvoke(() => labelStatus.Text = message);
+            LogData(message);
         }
 
-        private void LogData(string message)
+        // 日志等级枚举定义
+        public enum LogLevel { Info, Warning, Error }
+        private void LogData(string message, LogLevel level = LogLevel.Info)
         {
-            //SafeInvoke(() => listBoxCoordinates.Items.Add($"{DateTime.Now:T} {message}"));
+            SafeInvoke(() =>
+            {
+                // 确保控件是 RichTextBox（C# 7.3 兼容写法）
+                var rtb = textBoxCoordinates as RichTextBox;
+                if (rtb != null)
+                {
+                    // 记录原始颜色
+                    Color originalColor = rtb.SelectionColor;
+
+                    // 设置颜色（传统 switch 写法）
+                    switch (level)
+                    {
+                        case LogLevel.Error:
+                            rtb.SelectionColor = Color.Red;
+                            break;
+                        case LogLevel.Warning:
+                            rtb.SelectionColor = Color.Orange;
+                            break;
+                        default:
+                            rtb.SelectionColor = Color.Black;
+                            break;
+                    }
+
+                    // 追加带时间戳的消息
+                    rtb.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}\n");
+
+                    // 恢复默认颜色
+                    rtb.SelectionColor = originalColor;
+                }
+                else
+                {
+                    // 回退方案（理论上不会执行）
+                    textBoxCoordinates.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
+                }
+
+                // 自动滚动到底部
+                textBoxCoordinates.SelectionStart = textBoxCoordinates.Text.Length;
+                textBoxCoordinates.ScrollToCaret();
+            });
         }
 
         private void ShowMessage(string message)
@@ -299,12 +351,12 @@ namespace RoboVision
             SafeInvoke(() => MessageBox.Show(message));
         }
 
-        private void HandleError(string error)
+        private void HandleError(string error, bool status)
         {
             SafeInvoke(() =>
             {
                 MessageBox.Show(error, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                UpdateStatus($"错误：{error}");
+                UpdateStatus($"错误：{error}", false);
             });
         }
 
