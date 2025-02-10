@@ -7,12 +7,14 @@ using System.Windows.Forms;
 namespace RoboVision
 {
     public partial class CameraSelection : Form
-    {
+    { 
         public int SelectedCameraIndex { get; private set; } = 1;
+        public event EventHandler<string> selectingCamera;
 
         public CameraSelection(IEnumerable<string> cameras)
         {
             InitializeComponent();
+            selectingCamera?.Invoke(this, $"正在选择相机......");
             listBoxCameras.DataSource = cameras.ToList();
         }
 

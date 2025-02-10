@@ -2,6 +2,7 @@
 using OpenCvSharp;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
@@ -18,6 +19,8 @@ namespace RoboVision
         private CommunicationModule _comms;
         private readonly object _imageLock = new object();
         private bool _isClosing;
+        private bool _isCameraReady = false;
+        private bool _isProcessing;
 
         public MainForm()
         {
@@ -45,6 +48,7 @@ namespace RoboVision
             _camera.FrameUpdated += Camera_FrameUpdated;
             _camera.CaptureCompleted += Camera_CaptureCompleted;
             _camera.ErrorOccurred += Camera_ErrorOccurred;
+            _camera.ConnectingCamera += Camera_ConnectingCamera;
 
             // 深度学习事件
             _dlModel.ModelLoaded += DlModel_ModelLoaded;
@@ -65,14 +69,18 @@ namespace RoboVision
 
         private void Camera_CaptureCompleted(object sender, string savePath)
         {
-            ShowMessage($"图片已保存至：{savePath}");
-            LogData($"图片已保存至：{savePath}");
+            //ShowMessage($"图片已保存至：{savePath}");
+            UpdateStatus($"拍摄结果已保存至：{savePath}", false, LogLevel.Info);
+        }
+        // 相机选择事件
+        private void Camera_ConnectingCamera(object sender, string e)
+        {
+            UpdateStatus($"正在连接相机：{e}......", false, LogLevel.Info);
         }
         // 处理图像文件保存完成事件
         private void Deeplearning_ProceedCompleted(object sender, string savePath)
         {
-            ShowMessage($"图片已保存至：{savePath}");
-            LogData($"图片已保存至：{savePath}");
+            UpdateStatus($"检测结果已保存至：{savePath}", false, LogLevel.Info);
         }
 
         private void Camera_ErrorOccurred(object sender, string error)
@@ -82,28 +90,28 @@ namespace RoboVision
 
         private void DlModel_ModelLoaded(object sender, string msg)
         {
-            UpdateStatus($"模型加载：{msg}", false);
+            UpdateStatus($"模型加载：{msg}", false, LogLevel.Info);
         }
 
         private void DlModel_InferenceCompleted(object sender, string msg)
         {
-            UpdateStatus(msg, false);
+            UpdateStatus(msg, false, LogLevel.Info);
         }
 
         private void DlModel_ErrorOccurred(object sender, string msg)
         {
             HandleError($"模型错误：{msg}", false);
-            LogData($"模型错误：{msg}");
+            //UpdateStatus($"模型错误：{msg}", false, LogLevel.Error);
         }
 
         private void Comms_DataReceived(object sender, string data)
         {
-            LogData($"收到：{data}");
+            UpdateStatus($"收到：{data}", false, LogLevel.Info);
         }
 
         private void Comms_StatusChanged(object sender, string msg)
         {
-            UpdateStatus($"通信状态：{msg}", false);
+            UpdateStatus($"通信状态：{msg}", false, LogLevel.Info);
         }
         #endregion
 
@@ -115,21 +123,34 @@ namespace RoboVision
 
         private void btnSetParameters_Click(object sender, EventArgs e)
         {
-            ShowResolutionOptions();
+            try
+            {
+                ShowResolutionOptions();
+                _isCameraReady = true;
+            }
+            catch
+            {
+                HandleError("请先选择一个摄像头", false);
+            }
         }
 
         private void btnCapture_Click(object sender, EventArgs e)
         {
-            CaptureFrame();
+            if(_isCameraReady)
+                CaptureFrame();
+            else
+                HandleError("请先连接相机并设置参数", false);
         }
 
         private void btnProcess_Click(object sender, EventArgs e)
         {
-            _dlModel.LoadModel(@"models/yolov8s.onnx");
-            ProcessCurrentFrame();
+            if (_isCameraReady)
+                ProcessCurrentFrame();
+            else
+                HandleError("请先连接相机并设置参数", false);
         }
 
-        private void btnLoadModel_Click(object sender, EventArgs e)
+        private void btnLoadModel__Click(object sender, EventArgs e)
         {
             var dlg = new OpenFileDialog();
             if (dlg.ShowDialog() == DialogResult.OK)
@@ -146,24 +167,25 @@ namespace RoboVision
             {
                 _camera.StopCamera();
                 _camera.RefreshDevices();
-
+                UpdateStatus("开始检测相机......", false, LogLevel.Info);
                 if (!_camera.AvailableCameras.Any())
                 {
-                    ShowMessage("未检测到可用相机设备！");
+                    UpdateStatus("未检测到可用相机设备！", false, LogLevel.Warning);
                     return;
                 }
 
                 var csForm = new CameraSelection(_camera.AvailableCameras);
+                UpdateStatus($"正在选择相机......", false, LogLevel.Info);
                 if (csForm.ShowDialog() == DialogResult.OK)
                 {
                     _camera.SelectCamera(csForm.SelectedCameraIndex);
-                    UpdateStatus($"已连接 - {_camera.DeviceName}", true);
+                    UpdateStatus($"已连接：{_camera.DeviceName}", false, LogLevel.Info);
                     //ShowResolutionOptions();
                 }
             }
             catch (Exception ex)
             {
-                HandleError($"相机初始化失败：{ex.Message}", false);
+                HandleError($"相机初始化失败：{ex.Message}", false, LogLevel.Error);
             }
         }
 
@@ -178,7 +200,7 @@ namespace RoboVision
                 _camera.SetResolution(paramForm.SelectedResolution);
 
                 StartPreview();
-                ShowMessage($"当前分辨率：{_camera.CurrentResolution}");
+                UpdateStatus($"当前分辨率：{_camera.CurrentResolution}", false, LogLevel.Info);
             }
         }
 
@@ -187,7 +209,7 @@ namespace RoboVision
             try
             {
                 _camera.StartPreview();
-                UpdateStatus($"实时预览中 - {_camera.CurrentResolution}", true);
+                UpdateStatus($"实时预览中 - 分辨率：{_camera.CurrentResolution}", false, LogLevel.Info);
             }
             catch (Exception ex)
             {
@@ -217,9 +239,9 @@ namespace RoboVision
                     if (result != null)
                     {
                         // 创建需要显示的图像副本
-                        if(result.ProcessedImage==null)
+                        if (result.ProcessedImage == null)
                         {
-                            ShowMessage("处理后的图像为空");
+                            UpdateStatus($"处理后的图像为空", false, LogLevel.Warning);
                             return;
                         }
                         var displayImage = new Bitmap(result.ProcessedImage);
@@ -286,19 +308,50 @@ namespace RoboVision
 
         private void SendDetectionResults(List<BoundingBox> detections)
         {
-            var sb = new StringBuilder();
-            foreach (var box in detections)
+            try
             {
-                sb.AppendLine($"{box.Label},{box.Confidence:F2},{box.Rect.X},{box.Rect.Y},{box.Rect.Width},{box.Rect.Height}");
+                var sb = new StringBuilder();
+                detections.ForEach(box =>
+                {
+                    var dataLine = $"{box.Label},{box.Confidence:F2},{box.Rect.X},{box.Rect.Y},{box.Rect.Width},{box.Rect.Height}";
+                    sb.AppendLine(dataLine);
+                    UpdateStatus($"准备发送：{dataLine}", false, LogLevel.Info);
+                });
+
+                UpdateStatus("发送至服务器 127.0.0.1:8000 中......", false, LogLevel.Info);
+
+                // 使用Task避免阻塞UI线程
+                Task.Run(() => _comms.SendToClient("127.0.0.1", 8000, sb.ToString()))
+                    .ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                        {
+                            UpdateStatus($"发送失败：{t.Exception?.InnerException?.Message}", false, LogLevel.Error);
+                        }
+                    });
             }
-            _comms.SendToClient("127.0.0.1", 8000, sb.ToString());
+            catch (Exception ex)
+            {
+                UpdateStatus($"发送过程异常：{ex.Message}", false, LogLevel.Error);
+            }
         }
 
-        private void UpdateStatus(string message, bool status)
+        private void UpdateStatus(string message, bool status, LogLevel level = LogLevel.Info)
         {
-            if(status)
+            if (status)
                 SafeInvoke(() => labelStatus.Text = message);
-            LogData(message);
+            LogData(message, level);
+        }
+
+        // 消息类型枚举定义
+        public enum Mymsg
+        {
+            // 定义可能出现的消息类型
+            None = 0,
+            Info = 1,
+            Warning = 2,
+            Error = 3,
+            Success = 4
         }
 
         // 日志等级枚举定义
@@ -351,12 +404,12 @@ namespace RoboVision
             SafeInvoke(() => MessageBox.Show(message));
         }
 
-        private void HandleError(string error, bool status)
+        private void HandleError(string error, bool status, LogLevel level = LogLevel.Error)
         {
             SafeInvoke(() =>
             {
                 MessageBox.Show(error, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                UpdateStatus($"错误：{error}", false);
+                UpdateStatus($"错误：{error}", false, LogLevel.Error);
             });
         }
 

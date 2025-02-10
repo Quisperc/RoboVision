@@ -56,6 +56,7 @@ namespace RoboVision
                 var sessionOptions = new SessionOptions();
                 try
                 {
+                    ModelLoaded?.Invoke(this, $"使用GPU加速中......");
                     sessionOptions.AppendExecutionProvider_CUDA();
                 }
                 catch
@@ -65,6 +66,8 @@ namespace RoboVision
                 }
 
                 _session = new InferenceSession(modelPath, sessionOptions);
+                // 关闭
+                sessionOptions?.Close();
                 ModelLoaded?.Invoke(this, $"成功加载模型：{modelPath}");
             }
             catch (Exception ex)
@@ -276,6 +279,7 @@ namespace RoboVision
         public void Dispose()
         {
             if (_disposed) return;
+
             _session?.Dispose();
             _disposed = true;
         }

@@ -1,5 +1,6 @@
-﻿// ======================== 通信模块 CommunicationModule.cs ========================
+﻿// ======================== 修改后的 CommunicationModule.cs ========================
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -9,6 +10,8 @@ namespace RoboVision
 {
     public class CommunicationModule : IDisposable
     {
+        // 新增取消令牌源
+        private CancellationTokenSource _cts = new CancellationTokenSource();
         public event EventHandler<string> DataReceived;
         public event EventHandler<string> StatusChanged;
 
@@ -30,48 +33,71 @@ namespace RoboVision
                 };
                 _listenerThread.Start();
 
-                StatusChanged?.Invoke(this, $"服务器已启动 {ip}:{port}");
+                StatusChanged?.Invoke(this, $"通信服务器连接成功，地址 {ip}:{port}");
             }
             catch (Exception ex)
             {
-                StatusChanged?.Invoke(this, $"启动失败：{ex.Message}");
+                StatusChanged?.Invoke(this, $"通信服务器连接失败：{ex.Message}");
             }
         }
 
         private void ListenForClients()
         {
-            while (_running)
+            try
             {
-                try
+                while (!_cts.IsCancellationRequested)
                 {
-                    var client = _server.AcceptTcpClient();
-                    ThreadPool.QueueUserWorkItem(HandleClient, client);
+                    if (_server.Pending()) // 检查待处理连接
+                    {
+                        var client = _server.AcceptTcpClient();
+                        ThreadPool.QueueUserWorkItem(HandleClient, client);
+                    }
+                    else
+                    {
+                        Thread.Sleep(100); // 减少CPU占用
+                    }
                 }
-                catch (SocketException)
-                {
-                    break;
-                }
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.Interrupted)
+            {
+                // 正常关闭时的预期异常
+            }
+            catch (Exception ex)
+            {
+                StatusChanged?.Invoke(this, $"监听线程异常：{ex.Message}");
             }
         }
 
         private void HandleClient(object state)
         {
-            var client = (TcpClient)state;
-            try
+            using (var client = (TcpClient)state)
+            using (var stream = client.GetStream())
             {
-                var stream = client.GetStream();
-                var buffer = new byte[4096];
-                int bytesRead;
-
-                while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
+                try
                 {
-                    var message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                    DataReceived?.Invoke(this, message);
+                    var buffer = new byte[4096];
+                    while (!_cts.IsCancellationRequested && client.Connected)
+                    {
+                        if (stream.DataAvailable)
+                        {
+                            int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                            var message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                            DataReceived?.Invoke(this, message);
+                        }
+                        else
+                        {
+                            Thread.Sleep(50);
+                        }
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                StatusChanged?.Invoke(this, $"客户端错误：{ex.Message}");
+                catch (IOException ex) when ((ex.InnerException as SocketException)?.SocketErrorCode == SocketError.ConnectionReset)
+                {
+                    StatusChanged?.Invoke(this, "客户端强制断开连接");
+                }
+                catch (Exception ex)
+                {
+                    StatusChanged?.Invoke(this, $"客户端处理异常：{ex.Message}");
+                }
             }
         }
 
@@ -79,11 +105,16 @@ namespace RoboVision
         {
             try
             {
-                var client = new TcpClient(ip, port);
-                var stream = client.GetStream();
-                var data = Encoding.UTF8.GetBytes(message);
-                stream.Write(data, 0, data.Length);
-                StatusChanged?.Invoke(this, $"数据已发送至 {ip}:{port}");
+                using (var client = new TcpClient())
+                {
+                    client.Connect(ip, port);
+                    using (var stream = client.GetStream())
+                    {
+                        var data = Encoding.UTF8.GetBytes(message);
+                        stream.Write(data, 0, data.Length);
+                        StatusChanged?.Invoke(this, $"数据已发送至 {ip}:{port}");
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -93,9 +124,18 @@ namespace RoboVision
 
         public void Dispose()
         {
-            _running = false;
-            _server?.Stop();
-            _listenerThread?.Join(1000);
+            try
+            {
+                // 有序关闭流程
+                _cts.Cancel();
+                _server?.Stop();
+                _listenerThread?.Join(1000);
+
+                // 确保资源释放
+                _server?.Server?.Close();
+                _server?.Server?.Dispose();
+            }
+            catch (ObjectDisposedException) { /* 已释放对象无需处理 */ }
         }
     }
 }

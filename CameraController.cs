@@ -31,6 +31,7 @@ namespace RoboVision
         public event EventHandler<Bitmap> FrameUpdated;
         public event EventHandler<string> CaptureCompleted;
         public event EventHandler<string> ErrorOccurred;
+        public event EventHandler<string> ConnectingCamera;
 
         public List<string> AvailableCameras { get; } = new List<string>();
         public List<Size> AvailableResolutions { get; } = new List<Size>();
@@ -84,7 +85,7 @@ namespace RoboVision
             StopCamera();
             _selectedCameraIndex = cameraIndex;
             DeviceName = AvailableCameras[cameraIndex];
-
+            ConnectingCamera?.Invoke(this, DeviceName);
             // 获取设备支持的分辨率
             InitializeResolutions();
 
