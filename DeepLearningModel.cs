@@ -24,7 +24,7 @@ namespace RoboVision
         // 新增常量定义
         private const int TargetSize = 640;    // YOLOv8输入尺寸
         private const float ConfidenceThreshold = 0.8f;
-        private const float NmsThreshold = 0.8f;
+        private const float NmsThreshold = 0.45f;
         private static readonly string[] Labels = LoadLabels(); // COCO数据集标签
 
         // 修改为动态获取的标签列表
@@ -192,9 +192,8 @@ namespace RoboVision
             resized.UnlockBits(bitmapData);
             return inputTensor;
         }
-
         private List<BoundingBox> ParseOutput(Tensor<float> output, float ratio, (int top, int left) pad,
-                                            int origWidth, int origHeight)
+                                        int origWidth, int origHeight)
         {
             var boxes = new List<BoundingBox>();
             var outputData = output.ToArray();
@@ -206,18 +205,29 @@ namespace RoboVision
             {
                 int offset = i * dimensionsPerDetection;
 
-                // 解析坐标
-                float x = outputData[offset];
-                float y = outputData[offset + 1];
-                float w = outputData[offset + 2];
-                float h = outputData[offset + 3];
+                float x = outputData[offset] * 640f;
+                float y = outputData[offset + 1] * 640f;
+                float w = outputData[offset + 2] * 640f;
+                float h = outputData[offset + 3] * 640f;
 
-                // 查找最大类别分数
+                x = (x - pad.left) / ratio;
+                y = (y - pad.top) / ratio;
+                w /= ratio;
+                h /= ratio;
+
+                // 过滤无效坐标
+                if (w <= 1 || h <= 1)
+                {
+                    continue;
+                }
+
+                // 应用Sigmoid处理类别分数
                 float maxScore = 0;
                 int classId = -1;
                 for (int c = 4; c < dimensionsPerDetection; c++)
                 {
-                    var score = outputData[offset + c];
+                    var rawScore = outputData[offset + c];
+                    var score = 1.0f / (1.0f + (float)Math.Exp(-rawScore));
                     if (score > maxScore)
                     {
                         maxScore = score;
@@ -225,19 +235,15 @@ namespace RoboVision
                     }
                 }
 
-                // 过滤低置信度检测
                 if (maxScore < ConfidenceThreshold) continue;
 
-                // 转换到原始坐标
-                x = (x - pad.left) / ratio;
-                y = (y - pad.top) / ratio;
-                w /= ratio;
-                h /= ratio;
-
-                // 计算边界框坐标并限制范围
+                // 计算并限制边界框坐标
                 var (x1, y1, width, height) = SanitizeCoordinates(
-                    x, y, w, h,
+                    x - w / 2, y - h / 2, w, h,
                     origWidth, origHeight);
+
+                // 进一步过滤无效框
+                if (width < 5 || height < 5) continue;
 
                 boxes.Add(new BoundingBox
                 {
@@ -249,6 +255,7 @@ namespace RoboVision
 
             return ApplyNMS(boxes);
         }
+
         private (int x, int y, int w, int h) SanitizeCoordinates(float xCenter, float yCenter,
             float width, float height, int maxWidth, int maxHeight)
         {
@@ -283,19 +290,25 @@ namespace RoboVision
             var result = new List<BoundingBox>();
             var ordered = boxes.OrderByDescending(b => b.Confidence).ToList();
 
-            while (ordered.Count > 0)
-            {
-                // 取出当前最高置信度的检测结果
-                var current = ordered[0];
-                result.Add(current);
-                ordered.RemoveAt(0);
+            // 按类别分组处理
+            var classGroups = ordered.GroupBy(b => b.Label);
 
-                // 计算与剩余检测结果的IOU并过滤
-                ordered.RemoveAll(b => CalculateIOU(current.Rect, b.Rect) > NmsThreshold);
+            foreach (var group in classGroups)
+            {
+                var classBoxes = group.ToList();
+                while (classBoxes.Count > 0)
+                {
+                    var current = classBoxes[0];
+                    result.Add(current);
+                    classBoxes.RemoveAt(0);
+
+                    classBoxes.RemoveAll(b => CalculateIOU(current.Rect, b.Rect) > NmsThreshold);
+                }
             }
 
             return result;
         }
+
         private float CalculateIOU(Rectangle a, Rectangle b)
         {
             int areaA = a.Width * a.Height;

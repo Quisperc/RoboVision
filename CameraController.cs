@@ -250,13 +250,6 @@ namespace RoboVision
             }
         }
 
-        //public void StopCamera()
-        //{
-        //    _isRunning = false;
-        //     _captureThread?.Join(1000);
-        //    _videoCapture?.Release();
-        //    _videoCapture = null;     // 将引用置空
-        //}
         public void StopCamera()
         {
             _isRunning = false;
@@ -312,14 +305,24 @@ namespace RoboVision
             }
         }
 
+        private readonly object _frameLock = new object(); // 新增锁对象
         public void CaptureFrame()
         {
+            Mat frameCopy = null;
             try
             {
-                if (_currentFrame == null || _currentFrame.Empty()) return;
+                lock (_frameLock) // 加锁保证线程安全
+                {
+                    // 检查对象有效性
+                    if (_currentFrame == null || _currentFrame.IsDisposed || _currentFrame.Empty())
+                        return;
+
+                    // 创建深度拷贝
+                    frameCopy = _currentFrame.Clone();
+                }
 
                 var savePath = GetUniqueFilePath();
-                using (var bitmap = BitmapConverter.ToBitmap(_currentFrame))
+                using (var bitmap = BitmapConverter.ToBitmap(frameCopy))
                 {
                     EnsureDirectoryExists(savePath);
                     bitmap.Save(savePath, ImageFormat.Jpeg);
@@ -329,6 +332,10 @@ namespace RoboVision
             catch (Exception ex)
             {
                 OnErrorOccurred($"捕获失败: {ex.Message}");
+            }
+            finally
+            {
+                frameCopy?.Dispose(); // 确保临时拷贝被释放
             }
         }
 
