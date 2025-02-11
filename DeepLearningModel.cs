@@ -23,9 +23,13 @@ namespace RoboVision
 
         // 新增常量定义
         private const int TargetSize = 640;    // YOLOv8输入尺寸
-        private const float ConfidenceThreshold = 0.5f;
-        private const float NmsThreshold = 0.5f;
+        private const float ConfidenceThreshold = 0.8f;
+        private const float NmsThreshold = 0.8f;
         private static readonly string[] Labels = LoadLabels(); // COCO数据集标签
+
+        // 修改为动态获取的标签列表
+        private List<string> _labels = new List<string>();
+        private int _numClasses;
 
         private static string[] LoadLabels()
         {
@@ -68,12 +72,42 @@ namespace RoboVision
                 _session = new InferenceSession(modelPath, sessionOptions);
                 // 关闭
                 sessionOptions?.Close();
-                ModelLoaded?.Invoke(this, $"成功加载模型：{modelPath}");
+                //ModelLoaded?.Invoke(this, $"成功加载模型：{modelPath}");
+
+                // 获取模型输出维度信息
+                var outputName = _session.OutputNames[0];
+                var outputShape = _session.OutputMetadata[outputName].Dimensions;
+                _numClasses = outputShape[1] - 4; // 4代表xywh
+
+                // 尝试从模型元数据获取标签
+                if (_session.ModelMetadata?.CustomMetadataMap.TryGetValue("names", out var namesStr) ?? false)
+                {
+                    _labels = namesStr.Split(',').ToList();
+                    if (_labels.Count != _numClasses)
+                    {
+                        ErrorOccurred?.Invoke(this, $"元数据标签数量不匹配，使用默认标签");
+                        GenerateDefaultLabels();
+                    }
+                }
+                else
+                {
+                    GenerateDefaultLabels();
+                    ErrorOccurred?.Invoke(this, $"未找到标签元数据，使用默认标签");
+                }
+
+                ModelLoaded?.Invoke(this, $"成功加载模型：{modelPath}，检测类别数：{_numClasses}");
             }
             catch (Exception ex)
             {
                 ErrorOccurred?.Invoke(this, $"模型加载失败：{ex.Message}");
             }
+        }
+
+        private void GenerateDefaultLabels()
+        {
+            _labels = Enumerable.Range(0, _numClasses)
+                .Select(i => $"Class_{i + 1}")
+                .ToList();
         }
 
         public DetectionResult ProcessFrame(Bitmap frame)
@@ -165,19 +199,25 @@ namespace RoboVision
             var boxes = new List<BoundingBox>();
             var outputData = output.ToArray();
 
-            // YOLOv8输出格式 [1,84,8400]
-            for (int i = 0; i < output.Dimensions[2]; i++)
-            {
-                // 跳过低置信度检测
-                float confidence = outputData[4 + i * output.Dimensions[1]];
-                if (confidence < ConfidenceThreshold) continue;
+            int dimensionsPerDetection = output.Dimensions[1];
+            int numDetections = output.Dimensions[2];
 
-                // 获取最大类别分数
-                int classId = 0;
+            for (int i = 0; i < numDetections; i++)
+            {
+                int offset = i * dimensionsPerDetection;
+
+                // 解析坐标
+                float x = outputData[offset];
+                float y = outputData[offset + 1];
+                float w = outputData[offset + 2];
+                float h = outputData[offset + 3];
+
+                // 查找最大类别分数
                 float maxScore = 0;
-                for (int c = 4; c < output.Dimensions[1]; c++)
+                int classId = -1;
+                for (int c = 4; c < dimensionsPerDetection; c++)
                 {
-                    float score = outputData[c + i * output.Dimensions[1]];
+                    var score = outputData[offset + c];
                     if (score > maxScore)
                     {
                         maxScore = score;
@@ -185,39 +225,59 @@ namespace RoboVision
                     }
                 }
 
-                // 过滤低分检测
-                float totalScore = confidence * maxScore;
-                if (totalScore < ConfidenceThreshold) continue;
+                // 过滤低置信度检测
+                if (maxScore < ConfidenceThreshold) continue;
 
-                // 解析坐标 (中心x, 中心y, 宽度, 高度)
-                float x = outputData[0 + i * output.Dimensions[1]];
-                float y = outputData[1 + i * output.Dimensions[1]];
-                float w = outputData[2 + i * output.Dimensions[1]];
-                float h = outputData[3 + i * output.Dimensions[1]];
-
-                // 转换到原始图像坐标
+                // 转换到原始坐标
                 x = (x - pad.left) / ratio;
                 y = (y - pad.top) / ratio;
                 w /= ratio;
                 h /= ratio;
 
-                // 转换为中心点坐标到角点坐标
+                // 计算边界框坐标并限制范围
+                var (x1, y1, width, height) = SanitizeCoordinates(
+                    x, y, w, h,
+                    origWidth, origHeight);
+
                 boxes.Add(new BoundingBox
                 {
-                    Label = Labels[classId],
-                    Confidence = totalScore,
-                    Rect = new Rectangle(
-                        (int)(x - w / 2),
-                        (int)(y - h / 2),
-                        (int)w,
-                        (int)h)
+                    Label = _labels[classId],
+                    Confidence = maxScore,
+                    Rect = new Rectangle(x1, y1, width, height)
                 });
             }
 
-            // 应用非极大值抑制
             return ApplyNMS(boxes);
         }
+        private (int x, int y, int w, int h) SanitizeCoordinates(float xCenter, float yCenter,
+            float width, float height, int maxWidth, int maxHeight)
+        {
+            // 转换为角点坐标
+            float x = xCenter - width / 2;
+            float y = yCenter - height / 2;
 
+            // 限制坐标范围
+            x = Clamp(x, 0, maxWidth - 1);
+            y = Clamp(y, 0, maxHeight - 1);
+            width = Clamp(width, 1, maxWidth - x);
+            height = Clamp(height, 1, maxHeight - y);
+
+            return (
+                (int)Math.Round(x),
+                (int)Math.Round(y),
+                (int)Math.Round(width),
+                (int)Math.Round(height)
+            );
+        }
+
+        private float Clamp(float value, float min, float max)
+        {
+            if (value < min) return min;
+            if (value > max) return max;
+            return value;
+        }
+
+        // 改进的NMS方法
         private List<BoundingBox> ApplyNMS(List<BoundingBox> boxes)
         {
             var result = new List<BoundingBox>();
@@ -225,12 +285,13 @@ namespace RoboVision
 
             while (ordered.Count > 0)
             {
+                // 取出当前最高置信度的检测结果
                 var current = ordered[0];
                 result.Add(current);
+                ordered.RemoveAt(0);
 
-                // 移除与当前框IOU超过阈值的框
+                // 计算与剩余检测结果的IOU并过滤
                 ordered.RemoveAll(b => CalculateIOU(current.Rect, b.Rect) > NmsThreshold);
-                if (ordered.Count > 0) ordered.RemoveAt(0);
             }
 
             return result;
