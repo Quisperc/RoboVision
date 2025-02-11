@@ -1,11 +1,13 @@
 ﻿// MainForm.cs
 using OpenCvSharp;
+using OpenCvSharp.Extensions;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -21,6 +23,7 @@ namespace RoboVision
         private bool _isClosing;
         private bool _isCameraReady = false;
         private bool _isProcessing;
+        private Mat _currentFrame; // 用于存储当前帧
 
         public MainForm()
         {
@@ -136,8 +139,10 @@ namespace RoboVision
 
         private void btnCapture_Click(object sender, EventArgs e)
         {
-            if(_isCameraReady)
+            if (_isCameraReady)
+            {
                 CaptureFrame();
+            }
             else
                 HandleError("请先连接相机并设置参数", false);
         }
@@ -233,35 +238,57 @@ namespace RoboVision
         {
             Task.Run(() =>
             {
-                using (var frame = GetCurrentFrame())
+                GetCurrentFrame();
+                if (_currentFrame == null)
                 {
-                    var result = _dlModel.ProcessFrame(frame);
-                    if (result != null)
+                    UpdateStatus("当前帧2为空", false, LogLevel.Warning);
+                }
+                try
+                {
+                    using (var frame = _currentFrame.ToBitmap())
+                    // 使用CaptureFrame()替换GetCurrentFrame()
+                    //using (var frame = _camera.CaptureFrame().ToBitmap())
                     {
-                        // 创建需要显示的图像副本
-                        if (result.ProcessedImage == null)
+                        var result = _dlModel.ProcessFrame(frame);
+                        if (result != null)
                         {
-                            UpdateStatus($"处理后的图像为空", false, LogLevel.Warning);
-                            return;
+                            // 创建需要显示的图像副本
+                            if (result.ProcessedImage == null)
+                            {
+                                UpdateStatus($"处理后的图像为空", false, LogLevel.Warning);
+                                return;
+                            }
+                            var displayImage = new Bitmap(result.ProcessedImage);
+                            SendDetectionResults(result.Detections);
+                            UpdateProcessedImage(displayImage);
                         }
-                        var displayImage = new Bitmap(result.ProcessedImage);
-                        SendDetectionResults(result.Detections);
-                        UpdateProcessedImage(displayImage);
                     }
+                }
+                catch
+                {
+                    UpdateStatus("当前帧2为空", false, LogLevel.Warning);
                 }
             });
         }
-        #endregion
-
-        #region 辅助方法
-        private Bitmap GetCurrentFrame()
+        private void GetCurrentFrame()
         {
+            // 使用SafeInvoke确保线程安全, 但是这里不需要，使用之后_currentFrame为空，UI线程没有成功参与？
+            //SafeInvoke(() =>
+            //{
             lock (_imageLock)
-            {
-                return pictureBoxDisplay.Image != null
-                    ? new Bitmap(pictureBoxDisplay.Image)
-                    : null;
-            }
+                {
+                    if (pictureBoxDisplay.Image != null)
+                    {
+                        using (var bitmap = new Bitmap(pictureBoxDisplay.Image))
+                        {
+                            _currentFrame = BitmapConverter.ToMat(bitmap); // 使用BitmapConverter将Bitmap转换为Mat
+                        }
+                    }
+                }
+            //});
+            //return pictureBoxDisplay.Image != null
+            //    ? new Bitmap(pictureBoxDisplay.Image)
+            //    : null;
         }
 
         private void UpdatePreview(Bitmap frame)
