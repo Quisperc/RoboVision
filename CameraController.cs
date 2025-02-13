@@ -306,21 +306,23 @@ namespace RoboVision
         }
 
         private readonly object _frameLock = new object(); // 新增锁对象
-        public void CaptureFrame()
+        public Mat CaptureFrame()
         {
             Mat frameCopy = null;
-            //Mat frameCopyuse = null;
+            Mat frameCopyuse = null;
             try
             {
                 lock (_frameLock) // 加锁保证线程安全
                 {
                     // 检查对象有效性
                     if (_currentFrame == null || _currentFrame.IsDisposed || _currentFrame.Empty())
-                        return;
+                        return null;
 
                     // 创建深度拷贝
                     frameCopy = _currentFrame.Clone();
-                    //frameCopyuse = _currentFrame.Clone();
+                    // 用于保存用来深度学习的对象
+                    frameCopyuse?.Dispose();
+                    frameCopyuse = _currentFrame.Clone();
                 }
 
                 var savePath = GetUniqueFilePath();
@@ -330,12 +332,12 @@ namespace RoboVision
                     bitmap.Save(savePath, ImageFormat.Jpeg);
                 }
                 CaptureCompleted?.Invoke(this, savePath);
-                //return frameCopyuse;
+                return frameCopyuse;
             }
             catch (Exception ex)
             {
                 OnErrorOccurred($"捕获失败: {ex.Message}");
-                //return null; // 确保在异常情况下返回值
+                return null; // 确保在异常情况下返回值
             }
             finally
             {

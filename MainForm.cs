@@ -42,7 +42,7 @@ namespace RoboVision
 
             // 初始化通信模块
             _comms = new CommunicationModule();
-            _comms.StartServer("127.0.0.1", 8000);
+            _comms.StartServer("192.168.0.104", 8000);
         }
 
         private void SetupEventHandlers()
@@ -141,7 +141,9 @@ namespace RoboVision
         {
             if (_isCameraReady)
             {
-                CaptureFrame();
+                GetCurrentFrame();
+                // 删除之前保留的帧，避免内存泄漏
+                //_currentFrame?.Dispose();
             }
             else
                 HandleError("请先连接相机并设置参数", false);
@@ -150,7 +152,18 @@ namespace RoboVision
         private void btnProcess_Click(object sender, EventArgs e)
         {
             if (_isCameraReady)
-                ProcessCurrentFrame();
+            {
+                //CaptureFrame();
+                GetCurrentFrame();
+                if(_currentFrame==null)
+                {
+                    UpdateStatus("当前帧 _currentFrame 为空", false, LogLevel.Warning);
+                }
+                else
+                    ProcessCurrentFrame();
+                // 删除之前保留的帧，避免内存泄漏
+                //_currentFrame?.Dispose();
+            }
             else
                 HandleError("请先连接相机并设置参数", false);
         }
@@ -238,10 +251,9 @@ namespace RoboVision
         {
             Task.Run(() =>
             {
-                GetCurrentFrame();
                 if (_currentFrame == null)
                 {
-                    UpdateStatus("当前帧2为空", false, LogLevel.Warning);
+                    UpdateStatus("当前帧 _currentFrame 为空", false, LogLevel.Warning);
                 }
                 try
                 {
@@ -249,6 +261,10 @@ namespace RoboVision
                     // 使用CaptureFrame()替换GetCurrentFrame()
                     //using (var frame = _camera.CaptureFrame().ToBitmap())
                     {
+                        if (frame == null)
+                        {
+                            UpdateStatus("当前帧 frame 为空", false, LogLevel.Warning);
+                        }
                         var result = _dlModel.ProcessFrame(frame);
                         if (result != null)
                         {
@@ -264,9 +280,15 @@ namespace RoboVision
                         }
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    UpdateStatus("当前帧2为空", false, LogLevel.Warning);
+                    UpdateStatus($"处理图片错误：{ex.Message}", false, LogLevel.Error);
+                }
+                finally
+                {
+                    // 删除之前保留的帧，避免内存泄漏
+                    _currentFrame?.Dispose();
+                    _currentFrame = null;
                 }
             });
         }
@@ -275,20 +297,26 @@ namespace RoboVision
             // 使用SafeInvoke确保线程安全, 但是这里不需要，使用之后_currentFrame为空，UI线程没有成功参与？
             //SafeInvoke(() =>
             //{
-            lock (_imageLock)
-                {
-                    if (pictureBoxDisplay.Image != null)
-                    {
-                        using (var bitmap = new Bitmap(pictureBoxDisplay.Image))
-                        {
-                            _currentFrame = BitmapConverter.ToMat(bitmap); // 使用BitmapConverter将Bitmap转换为Mat
-                        }
-                    }
-                }
+            //lock (_imageLock)
+            //    {
+            //        if (pictureBoxDisplay.Image != null)
+            //        {
+            //            using (var bitmap = new Bitmap(pictureBoxDisplay.Image))
+            //            {
+            //                _currentFrame = BitmapConverter.ToMat(bitmap); // 使用BitmapConverter将Bitmap转换为Mat
+            //            }
+            //        }
+            //    }
             //});
             //return pictureBoxDisplay.Image != null
             //    ? new Bitmap(pictureBoxDisplay.Image)
             //    : null;
+            _currentFrame = _camera.CaptureFrame();
+            //_camera.CaptureFrame(_currentFrame);
+            if (_currentFrame == null)
+            {
+                UpdateStatus("当前帧为空", false, LogLevel.Warning);
+            }
         }
 
         private void UpdatePreview(Bitmap frame)
@@ -313,9 +341,11 @@ namespace RoboVision
                 {
                     var old = pictureBoxDisplay.Image;
                     pictureBoxDisplay.Image = new Bitmap(frame); // 创建独立副本
+                    //_currentFrame?.Dispose(); // 释放旧图像
+                    //_currentFrame = BitmapConverter.ToMat(frame);
+                    //_currentFrame = BitmapConverter.ToMat(new Bitmap(old)); // 创建独立副本
                     old?.Dispose(); // 释放旧图像
                 }
-
                 frame?.Dispose(); // 安全释放传入的 Bitmap
             });
         }
@@ -348,7 +378,7 @@ namespace RoboVision
                 UpdateStatus("发送至服务器 127.0.0.1:8000 中......", false, LogLevel.Info);
 
                 // 使用Task避免阻塞UI线程
-                Task.Run(() => _comms.SendToClient("127.0.0.1", 8000, sb.ToString()))
+                Task.Run(() => _comms.SendToClient("192.168.0.104", 8000, sb.ToString()))
                     .ContinueWith(t =>
                     {
                         if (t.IsFaulted)
@@ -460,12 +490,16 @@ namespace RoboVision
                 _camera?.Dispose();
                 _dlModel?.Dispose();
                 _comms?.Dispose();
+                _currentFrame?.Dispose();
 
                 lock (_imageLock)
                 {
                     var img = pictureBoxDisplay.Image;
                     pictureBoxDisplay.Image = null;
                     img?.Dispose();
+                    var imgPro = pictureBoxProcessed .Image;
+                    pictureBoxProcessed.Image = null;
+                    imgPro?.Dispose();
                 }
             }
             catch (Exception ex)

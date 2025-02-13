@@ -5,6 +5,7 @@ using OpenCvSharp.Extensions;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
@@ -150,18 +151,22 @@ namespace RoboVision
             }
         }
 
+        // 预处理图像
         private Tensor<float> PreprocessFrame(Bitmap frame, out float ratio, out (int top, int left) pad)
         {
             // 计算缩放比例
             ratio = Math.Min((float)TargetSize / frame.Width, (float)TargetSize / frame.Height);
             var newWidth = (int)(frame.Width * ratio);
             var newHeight = (int)(frame.Height * ratio);
-            pad = ((TargetSize - newHeight) / 2, (TargetSize - newWidth) / 2);
+            //pad = ((TargetSize - newHeight) / 2, (TargetSize - newWidth) / 2);
+            // 使用+1修正边界问题，保证不会出现负数，非对称填充
+            pad = ((TargetSize - newHeight + 1) / 2, (TargetSize - newWidth + 1) / 2);
 
             // 创建Letterbox图像
             var resized = new Bitmap(TargetSize, TargetSize);
             using (var g = Graphics.FromImage(resized))
             {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic; // 高质量插值
                 g.Clear(Color.FromArgb(114, 114, 114)); // YOLO标准填充色
                 g.DrawImage(frame, pad.left, pad.top, newWidth, newHeight);
             }
@@ -180,10 +185,14 @@ namespace RoboVision
                 {
                     for (int x = 0; x < bitmapData.Width; x++)
                     {
-                        // 输入通道顺序为RGB，归一化到0-1范围
-                        inputTensor[0, 0, y, x] = p[2] / 255f; // R
-                        inputTensor[0, 1, y, x] = p[1] / 255f; // G 
-                        inputTensor[0, 2, y, x] = p[0] / 255f; // B
+                        //// 输入通道顺序为RGB，归一化到0-1范围
+                        //inputTensor[0, 0, y, x] = p[2] / 255f; // R
+                        //inputTensor[0, 1, y, x] = p[1] / 255f; // G 
+                        //inputTensor[0, 2, y, x] = p[0] / 255f; // B
+                        // 使用BGR通道顺序
+                        inputTensor[0, 0, y, x] = p[0] / 255f; // B
+                        inputTensor[0, 1, y, x] = p[1] / 255f; // G
+                        inputTensor[0, 2, y, x] = p[2] / 255f; // R
                         p += 3;
                     }
                     p += bitmapData.Stride - bitmapData.Width * 3;
@@ -205,10 +214,18 @@ namespace RoboVision
             {
                 int offset = i * dimensionsPerDetection;
 
-                float x = outputData[offset] * 640f;
-                float y = outputData[offset + 1] * 640f;
-                float w = outputData[offset + 2] * 640f;
-                float h = outputData[offset + 3] * 640f;
+                // 假设模型输出的是归一化后的坐标（0 - 1范围），但可能实际输出已经是相对于640x640图像的绝对坐标
+                // 根据模型实际情况选择处理方式：
+                //float x = outputData[offset] * 640f;
+                //float y = outputData[offset + 1] * 640f;
+                //float w = outputData[offset + 2] * 640f;
+                //float h = outputData[offset + 3] * 640f;
+                // 可能导致二次缩放，直接使用原始值
+                float x = outputData[offset];
+                float y = outputData[offset + 1];
+                float w = outputData[offset + 2];
+                float h = outputData[offset + 3];
+
 
                 x = (x - pad.left) / ratio;
                 y = (y - pad.top) / ratio;
@@ -266,7 +283,9 @@ namespace RoboVision
             // 限制坐标范围
             x = Clamp(x, 0, maxWidth - 1);
             y = Clamp(y, 0, maxHeight - 1);
-            width = Clamp(width, 1, maxWidth - x);
+            //width = Clamp(width, 1, maxWidth - x);
+            // 当maxWidth - x可能为负数时会导致异常，增加保护性判断
+            width = Clamp(width, 1, Math.Max(0, maxWidth - x));
             height = Clamp(height, 1, maxHeight - y);
 
             return (
@@ -284,7 +303,7 @@ namespace RoboVision
             return value;
         }
 
-        // 改进的NMS方法
+        // 改进的NMS方法：计算IOU时使用的是整数坐标的Rectangle，可能导致精度丢失，使用浮点数计算IOU：
         private List<BoundingBox> ApplyNMS(List<BoundingBox> boxes)
         {
             var result = new List<BoundingBox>();
@@ -309,20 +328,20 @@ namespace RoboVision
             return result;
         }
 
-        private float CalculateIOU(Rectangle a, Rectangle b)
+        private float CalculateIOU(RectangleF a, RectangleF b)
         {
-            int areaA = a.Width * a.Height;
-            int areaB = b.Width * b.Height;
+            float areaA = a.Width * a.Height;
+            float areaB = b.Width * b.Height;
 
-            int x1 = Math.Max(a.Left, b.Left);
-            int y1 = Math.Max(a.Top, b.Top);
-            int x2 = Math.Min(a.Right, b.Right);
-            int y2 = Math.Min(a.Bottom, b.Bottom);
+            float x1 = Math.Max(a.Left, b.Left);
+            float y1 = Math.Max(a.Top, b.Top);
+            float x2 = Math.Min(a.Right, b.Right);
+            float y2 = Math.Min(a.Bottom, b.Bottom);
 
             if (x2 < x1 || y2 < y1) return 0;
 
-            int intersection = (x2 - x1) * (y2 - y1);
-            return (float)intersection / (areaA + areaB - intersection);
+            float intersection = (x2 - x1) * (y2 - y1);
+            return intersection / (areaA + areaB - intersection);
         }
 
         private Bitmap PostProcessFrame(Bitmap frame, List<BoundingBox> boxes)
@@ -334,7 +353,13 @@ namespace RoboVision
                     // 绘制边界框
                     using (var pen = new Pen(Color.Red, 2))
                     {
-                        g.DrawRectangle(pen, box.Rect);
+                        // g.DrawRectangle(pen, box.Rect);
+                        // 当绘制半像素偏移时可能出现错位，使用浮点坐标
+                        g.DrawRectangle(pen,
+                            box.Rect.X + 0.5f,
+                            box.Rect.Y + 0.5f,
+                            box.Rect.Width - 1,
+                            box.Rect.Height - 1);
                     }
 
                     // 绘制标签
