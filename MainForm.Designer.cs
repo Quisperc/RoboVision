@@ -122,7 +122,7 @@ namespace RoboVision
             // labelStatus
             // 
             this.labelStatus.AutoSize = true;
-            this.labelStatus.Location = new System.Drawing.Point(24, 406);
+            this.labelStatus.Location = new System.Drawing.Point(11, 406);
             this.labelStatus.Name = "labelStatus";
             this.labelStatus.Size = new System.Drawing.Size(97, 15);
             this.labelStatus.TabIndex = 5;

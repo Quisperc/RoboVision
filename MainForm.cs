@@ -73,17 +73,17 @@ namespace RoboVision
         private void Camera_CaptureCompleted(object sender, string savePath)
         {
             //ShowMessage($"图片已保存至：{savePath}");
-            UpdateStatus($"拍摄结果已保存至：{savePath}", false, LogLevel.Info);
+            UpdateStatus($"拍摄结果已保存至：{savePath}", myMsg.none, LogLevel.Info);
         }
         // 相机选择事件
         private void Camera_ConnectingCamera(object sender, string e)
         {
-            UpdateStatus($"正在连接相机：{e}......", false, LogLevel.Info);
+            UpdateStatus($"正在连接相机：{e}......", myMsg.none, LogLevel.Info);
         }
         // 处理图像文件保存完成事件
         private void Deeplearning_ProceedCompleted(object sender, string savePath)
         {
-            UpdateStatus($"检测结果已保存至：{savePath}", false, LogLevel.Info);
+            UpdateStatus($"检测结果已保存至：{savePath}", myMsg.none, LogLevel.Info);
         }
 
         private void Camera_ErrorOccurred(object sender, string error)
@@ -93,12 +93,12 @@ namespace RoboVision
 
         private void DlModel_ModelLoaded(object sender, string msg)
         {
-            UpdateStatus($"模型加载：{msg}", false, LogLevel.Info);
+            UpdateStatus($"模型加载：{msg}", myMsg.none, LogLevel.Info);
         }
 
         private void DlModel_InferenceCompleted(object sender, string msg)
         {
-            UpdateStatus(msg, false, LogLevel.Info);
+            UpdateStatus(msg, myMsg.none, LogLevel.Info);
         }
 
         private void DlModel_ErrorOccurred(object sender, string msg)
@@ -109,12 +109,12 @@ namespace RoboVision
 
         private void Comms_DataReceived(object sender, string data)
         {
-            UpdateStatus($"收到：{data}", false, LogLevel.Info);
+            UpdateStatus($"收到：{data}", myMsg.none, LogLevel.Info);
         }
 
         private void Comms_StatusChanged(object sender, string msg)
         {
-            UpdateStatus($"通信状态：{msg}", false, LogLevel.Info);
+            UpdateStatus($"通信状态：{msg}", myMsg.none, LogLevel.Info);
         }
         #endregion
 
@@ -157,7 +157,7 @@ namespace RoboVision
                 GetCurrentFrame();
                 if(_currentFrame==null)
                 {
-                    UpdateStatus("当前帧 _currentFrame 为空", false, LogLevel.Warning);
+                    UpdateStatus("当前帧 _currentFrame 为空", myMsg.none, LogLevel.Warning);
                 }
                 else
                     ProcessCurrentFrame();
@@ -185,19 +185,19 @@ namespace RoboVision
             {
                 _camera.StopCamera();
                 _camera.RefreshDevices();
-                UpdateStatus("开始检测相机......", false, LogLevel.Info);
+                UpdateStatus("开始检测相机......", myMsg.none, LogLevel.Info);
                 if (!_camera.AvailableCameras.Any())
                 {
-                    UpdateStatus("未检测到可用相机设备！", false, LogLevel.Warning);
+                    UpdateStatus("未检测到可用相机设备！", myMsg.none, LogLevel.Warning);
                     return;
                 }
 
                 var csForm = new CameraSelection(_camera.AvailableCameras);
-                UpdateStatus($"正在选择相机......", false, LogLevel.Info);
+                UpdateStatus($"正在选择相机......", myMsg.none, LogLevel.Info);
                 if (csForm.ShowDialog() == DialogResult.OK)
                 {
                     _camera.SelectCamera(csForm.SelectedCameraIndex);
-                    UpdateStatus($"已连接：{_camera.DeviceName}", false, LogLevel.Info);
+                    UpdateStatus($"已连接：{_camera.DeviceName}", myMsg.Camera_connected, LogLevel.Info);
                     //ShowResolutionOptions();
                 }
             }
@@ -218,7 +218,7 @@ namespace RoboVision
                 _camera.SetResolution(paramForm.SelectedResolution);
 
                 StartPreview();
-                UpdateStatus($"当前分辨率：{_camera.CurrentResolution}", false, LogLevel.Info);
+                UpdateStatus($"当前分辨率：{_camera.CurrentResolution}", myMsg.none, LogLevel.Info);
             }
         }
 
@@ -227,7 +227,7 @@ namespace RoboVision
             try
             {
                 _camera.StartPreview();
-                UpdateStatus($"实时预览中 - 分辨率：{_camera.CurrentResolution}", false, LogLevel.Info);
+                UpdateStatus($"实时预览中 - 分辨率：{_camera.CurrentResolution}", myMsg.none, LogLevel.Info);
             }
             catch (Exception ex)
             {
@@ -253,7 +253,7 @@ namespace RoboVision
             {
                 if (_currentFrame == null)
                 {
-                    UpdateStatus("当前帧 _currentFrame 为空", false, LogLevel.Warning);
+                    UpdateStatus("当前帧 _currentFrame 为空", myMsg.none, LogLevel.Warning);
                 }
                 try
                 {
@@ -263,7 +263,7 @@ namespace RoboVision
                     {
                         if (frame == null)
                         {
-                            UpdateStatus("当前帧 frame 为空", false, LogLevel.Warning);
+                            UpdateStatus("当前帧 frame 为空", myMsg.none, LogLevel.Warning);
                         }
                         var result = _dlModel.ProcessFrame(frame);
                         if (result != null)
@@ -271,7 +271,7 @@ namespace RoboVision
                             // 创建需要显示的图像副本
                             if (result.ProcessedImage == null)
                             {
-                                UpdateStatus($"处理后的图像为空", false, LogLevel.Warning);
+                                UpdateStatus($"处理后的图像为空", myMsg.none, LogLevel.Warning);
                                 return;
                             }
                             var displayImage = new Bitmap(result.ProcessedImage);
@@ -282,7 +282,7 @@ namespace RoboVision
                 }
                 catch (Exception ex)
                 {
-                    UpdateStatus($"处理图片错误：{ex.Message}", false, LogLevel.Error);
+                    UpdateStatus($"处理图片错误：{ex.Message}", myMsg.none, LogLevel.Error);
                 }
                 finally
                 {
@@ -315,7 +315,7 @@ namespace RoboVision
             //_camera.CaptureFrame(_currentFrame);
             if (_currentFrame == null)
             {
-                UpdateStatus("当前帧为空", false, LogLevel.Warning);
+                UpdateStatus("当前帧为空", myMsg.none, LogLevel.Warning);
             }
         }
 
@@ -372,10 +372,10 @@ namespace RoboVision
                 {
                     var dataLine = $"{box.Label},{box.Confidence:F2},{box.Rect.X},{box.Rect.Y},{box.Rect.Width},{box.Rect.Height}";
                     sb.AppendLine(dataLine);
-                    UpdateStatus($"准备发送：{dataLine}", false, LogLevel.Info);
+                    UpdateStatus($"准备发送：{dataLine}", myMsg.none, LogLevel.Info);
                 });
 
-                UpdateStatus("发送至服务器 127.0.0.1:8000 中......", false, LogLevel.Info);
+                UpdateStatus("发送至服务器 127.0.0.1:8000 中......", myMsg.none, LogLevel.Info);
 
                 // 使用Task避免阻塞UI线程
                 Task.Run(() => _comms.SendToClient("192.168.0.104", 8000, sb.ToString()))
@@ -383,32 +383,31 @@ namespace RoboVision
                     {
                         if (t.IsFaulted)
                         {
-                            UpdateStatus($"发送失败：{t.Exception?.InnerException?.Message}", false, LogLevel.Error);
+                            UpdateStatus($"发送失败：{t.Exception?.InnerException?.Message}", myMsg.none, LogLevel.Error);
                         }
                     });
             }
             catch (Exception ex)
             {
-                UpdateStatus($"发送过程异常：{ex.Message}", false, LogLevel.Error);
+                UpdateStatus($"发送过程异常：{ex.Message}", myMsg.none, LogLevel.Error);
             }
         }
 
-        private void UpdateStatus(string message, bool status, LogLevel level = LogLevel.Info)
+        private void UpdateStatus(string message, myMsg mymsg = myMsg.none , LogLevel level = LogLevel.Info)
         {
-            if (status)
+            if (mymsg == myMsg.Camera_connected)
+            {
+                SafeInvoke(() => labelCurrentCamera.Text = message);
                 SafeInvoke(() => labelStatus.Text = message);
+            }
             LogData(message, level);
         }
 
         // 消息类型枚举定义
-        public enum Mymsg
+        public enum myMsg
         {
             // 定义可能出现的消息类型
-            None = 0,
-            Info = 1,
-            Warning = 2,
-            Error = 3,
-            Success = 4
+            none, Camera_connected, disconnected, error
         }
 
         // 日志等级枚举定义
@@ -439,7 +438,7 @@ namespace RoboVision
                     }
 
                     // 追加带时间戳的消息
-                    rtb.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}\n");
+                    rtb.AppendText($"[{DateTime.Now:yyyy:MM:dd}_{DateTime.Now:HH:mm:ss}] {message}\n");
 
                     // 恢复默认颜色
                     rtb.SelectionColor = originalColor;
@@ -466,7 +465,7 @@ namespace RoboVision
             SafeInvoke(() =>
             {
                 MessageBox.Show(error, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                UpdateStatus($"错误：{error}", false, LogLevel.Error);
+                UpdateStatus($"错误：{error}", myMsg.none, LogLevel.Error);
             });
         }
 
