@@ -1,4 +1,4 @@
-﻿// ======================== 修改后的 CommunicationModule.cs ========================
+﻿// ======================== CommunicationModule.cs ========================
 using System;
 using System.IO;
 using System.Net;

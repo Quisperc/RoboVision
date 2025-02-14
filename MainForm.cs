@@ -42,7 +42,7 @@ namespace RoboVision
 
             // 初始化通信模块
             _comms = new CommunicationModule();
-            _comms.StartServer("192.168.0.104", 8000);
+            _comms.StartServer("127.0.0.1", 8000);
         }
 
         private void SetupEventHandlers()
@@ -378,7 +378,7 @@ namespace RoboVision
                 UpdateStatus("发送至服务器 127.0.0.1:8000 中......", myMsg.none, LogLevel.Info);
 
                 // 使用Task避免阻塞UI线程
-                Task.Run(() => _comms.SendToClient("192.168.0.104", 8000, sb.ToString()))
+                Task.Run(() => _comms.SendToClient("127.0.0.1", 8000, sb.ToString()))
                     .ContinueWith(t =>
                     {
                         if (t.IsFaulted)
