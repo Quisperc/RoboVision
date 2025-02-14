@@ -24,7 +24,7 @@ namespace RoboVision
 
         // 新增常量定义
         private const int TargetSize = 640;    // YOLOv8输入尺寸
-        private const float ConfidenceThreshold = 0.8f;
+        private const float ConfidenceThreshold = 0.55f;
         private const float NmsThreshold = 0.45f;
         private static readonly string[] Labels = LoadLabels(); // COCO数据集标签
 
@@ -186,13 +186,13 @@ namespace RoboVision
                     for (int x = 0; x < bitmapData.Width; x++)
                     {
                         //// 输入通道顺序为RGB，归一化到0-1范围
-                        //inputTensor[0, 0, y, x] = p[2] / 255f; // R
-                        //inputTensor[0, 1, y, x] = p[1] / 255f; // G 
-                        //inputTensor[0, 2, y, x] = p[0] / 255f; // B
+                        inputTensor[0, 0, y, x] = p[2] / 255f; // R
+                        inputTensor[0, 1, y, x] = p[1] / 255f; // G 
+                        inputTensor[0, 2, y, x] = p[0] / 255f; // B
                         // 使用BGR通道顺序
-                        inputTensor[0, 0, y, x] = p[0] / 255f; // B
-                        inputTensor[0, 1, y, x] = p[1] / 255f; // G
-                        inputTensor[0, 2, y, x] = p[2] / 255f; // R
+                        //inputTensor[0, 0, y, x] = p[0] / 255f; // B
+                        //inputTensor[0, 1, y, x] = p[1] / 255f; // G
+                        //inputTensor[0, 2, y, x] = p[2] / 255f; // R
                         p += 3;
                     }
                     p += bitmapData.Stride - bitmapData.Width * 3;
@@ -201,72 +201,138 @@ namespace RoboVision
             resized.UnlockBits(bitmapData);
             return inputTensor;
         }
+        //private List<BoundingBox> ParseOutput(Tensor<float> output, float ratio, (int top, int left) pad,
+        //                                int origWidth, int origHeight)
+        //{
+        //    var boxes = new List<BoundingBox>();
+        //    var outputData = output.ToArray();
+
+        //    int dimensionsPerDetection = output.Dimensions[1];
+        //    int numDetections = output.Dimensions[2];
+
+        //    for (int i = 0; i < numDetections; i++)
+        //    {
+        //        int offset = i * dimensionsPerDetection;
+
+        //        // 假设模型输出的是归一化后的坐标（0 - 1范围），但可能实际输出已经是相对于640x640图像的绝对坐标
+        //        // 根据模型实际情况选择处理方式：
+        //        //float x = outputData[offset] * 640f;
+        //        //float y = outputData[offset + 1] * 640f;
+        //        //float w = outputData[offset + 2] * 640f;
+        //        //float h = outputData[offset + 3] * 640f;
+        //        // 可能导致二次缩放，直接使用原始值
+        //        float x = outputData[offset];
+        //        float y = outputData[offset + 1];
+        //        float w = outputData[offset + 2];
+        //        float h = outputData[offset + 3];
+
+
+        //        x = (x - pad.left) / ratio;
+        //        y = (y - pad.top) / ratio;
+        //        w /= ratio;
+        //        h /= ratio;
+
+        //        // 过滤无效坐标
+        //        if (w <= 1 || h <= 1)
+        //        {
+        //            continue;
+        //        }
+
+        //        // 应用Sigmoid处理类别分数
+        //        float maxScore = 0;
+        //        int classId = -1;
+        //        for (int c = 4; c < dimensionsPerDetection; c++)
+        //        {
+        //            var rawScore = outputData[offset + c];
+        //            var score = 1.0f / (1.0f + (float)Math.Exp(-rawScore));
+        //            if (score > maxScore)
+        //            {
+        //                maxScore = score;
+        //                classId = c - 4;
+        //            }
+        //        }
+
+        //        if (maxScore < ConfidenceThreshold) continue;
+
+        //        // 计算并限制边界框坐标
+        //        var (x1, y1, width, height) = SanitizeCoordinates(
+        //            x - w / 2, y - h / 2, w, h,
+        //            origWidth, origHeight);
+
+        //        // 进一步过滤无效框
+        //        if (width < 5 || height < 5) continue;
+
+        //        boxes.Add(new BoundingBox
+        //        {
+        //            Label = _labels[classId],
+        //            Confidence = maxScore,
+        //            Rect = new Rectangle(x1, y1, width, height)
+        //        });
+        //    }
+
+        //    return ApplyNMS(boxes);
+        //}
+
+        // 将所有的MathF替换为Math，并添加显式类型转换
+        //private static float FastSigmoid(float x)
+        //{
+        //    return 1.0f / (1.0f + (float)Math.Exp(-x)); // 添加显式转换
+        //}
         private List<BoundingBox> ParseOutput(Tensor<float> output, float ratio, (int top, int left) pad,
-                                        int origWidth, int origHeight)
+                                int origWidth, int origHeight)
         {
             var boxes = new List<BoundingBox>();
-            var outputData = output.ToArray();
 
-            int dimensionsPerDetection = output.Dimensions[1];
-            int numDetections = output.Dimensions[2];
+            // 修复维度处理
+            var reshaped = output.Reshape(new[] { 1, output.Dimensions[1], output.Dimensions[2] });
+            int numAnchors = reshaped.Dimensions[2];
+            int numClasses = reshaped.Dimensions[1] - 4;
 
-            for (int i = 0; i < numDetections; i++)
+            for (int i = 0; i < numAnchors; i++)
             {
-                int offset = i * dimensionsPerDetection;
+                float xCenter = reshaped[0, 0, i];
+                float yCenter = reshaped[0, 1, i];
+                float width = reshaped[0, 2, i];
+                float height = reshaped[0, 3, i];
 
-                // 假设模型输出的是归一化后的坐标（0 - 1范围），但可能实际输出已经是相对于640x640图像的绝对坐标
-                // 根据模型实际情况选择处理方式：
-                //float x = outputData[offset] * 640f;
-                //float y = outputData[offset + 1] * 640f;
-                //float w = outputData[offset + 2] * 640f;
-                //float h = outputData[offset + 3] * 640f;
-                // 可能导致二次缩放，直接使用原始值
-                float x = outputData[offset];
-                float y = outputData[offset + 1];
-                float w = outputData[offset + 2];
-                float h = outputData[offset + 3];
+                // 跳过无效预测
+                if (width <= 0 || height <= 0) continue;
 
+                // 转换到原始图像坐标
+                float xMin = (xCenter - width / 2 - pad.left) / ratio;
+                float yMin = (yCenter - height / 2 - pad.top) / ratio;
+                float xMax = (xCenter + width / 2 - pad.left) / ratio;
+                float yMax = (yCenter + height / 2 - pad.top) / ratio;
 
-                x = (x - pad.left) / ratio;
-                y = (y - pad.top) / ratio;
-                w /= ratio;
-                h /= ratio;
+                // 限制坐标范围
+                xMin = Clamp(xMin, 0, origWidth);
+                yMin = Clamp(yMin, 0, origHeight);
+                xMax = Clamp(xMax, 0, origWidth);
+                yMax = Clamp(yMax, 0, origHeight);
 
-                // 过滤无效坐标
-                if (w <= 1 || h <= 1)
-                {
-                    continue;
-                }
-
-                // 应用Sigmoid处理类别分数
+                // 获取类别分数
                 float maxScore = 0;
                 int classId = -1;
-                for (int c = 4; c < dimensionsPerDetection; c++)
+                for (int c = 0; c < numClasses; c++)
                 {
-                    var rawScore = outputData[offset + c];
-                    var score = 1.0f / (1.0f + (float)Math.Exp(-rawScore));
-                    if (score > maxScore)
+                    float score = 1.0f / (1.0f + (float)Math.Exp(-reshaped[0, 4 + c, i]));
+                    if (score > maxScore && score > ConfidenceThreshold)
                     {
                         maxScore = score;
-                        classId = c - 4;
+                        classId = c;
                     }
                 }
 
-                if (maxScore < ConfidenceThreshold) continue;
-
-                // 计算并限制边界框坐标
-                var (x1, y1, width, height) = SanitizeCoordinates(
-                    x - w / 2, y - h / 2, w, h,
-                    origWidth, origHeight);
-
-                // 进一步过滤无效框
-                if (width < 5 || height < 5) continue;
+                if (classId == -1) continue;
 
                 boxes.Add(new BoundingBox
                 {
                     Label = _labels[classId],
                     Confidence = maxScore,
-                    Rect = new Rectangle(x1, y1, width, height)
+                    Rect = new Rectangle(
+                        (int)xMin, (int)yMin,
+                        (int)(xMax - xMin),
+                        (int)(yMax - yMin))
                 });
             }
 
