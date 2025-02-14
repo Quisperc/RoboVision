@@ -65,13 +65,18 @@ namespace RoboVision
             this.labelCurrentCamera = new System.Windows.Forms.Label();
             this.pictureBoxProcessed = new System.Windows.Forms.PictureBox();
             this.btnLoadModel = new System.Windows.Forms.Button();
+            this.textTargetIP = new System.Windows.Forms.TextBox();
+            this.textTargetPort = new System.Windows.Forms.TextBox();
+            this.DesLabel = new System.Windows.Forms.Label();
+            this.ListenPortLabel = new System.Windows.Forms.Label();
+            this.sourcePortLabel = new System.Windows.Forms.Label();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxDisplay)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxProcessed)).BeginInit();
             this.SuspendLayout();
             // 
             // btnDetectCamera
             // 
-            this.btnDetectCamera.Location = new System.Drawing.Point(20, 21);
+            this.btnDetectCamera.Location = new System.Drawing.Point(19, 159);
             this.btnDetectCamera.Name = "btnDetectCamera";
             this.btnDetectCamera.Size = new System.Drawing.Size(120, 47);
             this.btnDetectCamera.TabIndex = 0;
@@ -81,7 +86,7 @@ namespace RoboVision
             // 
             // btnSetParameters
             // 
-            this.btnSetParameters.Location = new System.Drawing.Point(20, 87);
+            this.btnSetParameters.Location = new System.Drawing.Point(19, 212);
             this.btnSetParameters.Name = "btnSetParameters";
             this.btnSetParameters.Size = new System.Drawing.Size(120, 46);
             this.btnSetParameters.TabIndex = 1;
@@ -91,7 +96,7 @@ namespace RoboVision
             // 
             // btnCapture
             // 
-            this.btnCapture.Location = new System.Drawing.Point(20, 152);
+            this.btnCapture.Location = new System.Drawing.Point(19, 264);
             this.btnCapture.Name = "btnCapture";
             this.btnCapture.Size = new System.Drawing.Size(120, 45);
             this.btnCapture.TabIndex = 2;
@@ -101,7 +106,7 @@ namespace RoboVision
             // 
             // btnProcess
             // 
-            this.btnProcess.Location = new System.Drawing.Point(20, 291);
+            this.btnProcess.Location = new System.Drawing.Point(19, 366);
             this.btnProcess.Name = "btnProcess";
             this.btnProcess.Size = new System.Drawing.Size(120, 45);
             this.btnProcess.TabIndex = 3;
@@ -122,7 +127,7 @@ namespace RoboVision
             // labelStatus
             // 
             this.labelStatus.AutoSize = true;
-            this.labelStatus.Location = new System.Drawing.Point(11, 406);
+            this.labelStatus.Location = new System.Drawing.Point(11, 463);
             this.labelStatus.Name = "labelStatus";
             this.labelStatus.Size = new System.Drawing.Size(97, 15);
             this.labelStatus.TabIndex = 5;
@@ -140,7 +145,7 @@ namespace RoboVision
             // labelCurrentCamera
             // 
             this.labelCurrentCamera.AutoSize = true;
-            this.labelCurrentCamera.Location = new System.Drawing.Point(12, 369);
+            this.labelCurrentCamera.Location = new System.Drawing.Point(12, 432);
             this.labelCurrentCamera.Name = "labelCurrentCamera";
             this.labelCurrentCamera.Size = new System.Drawing.Size(127, 15);
             this.labelCurrentCamera.TabIndex = 7;
@@ -158,7 +163,7 @@ namespace RoboVision
             // 
             // btnLoadModel
             // 
-            this.btnLoadModel.Location = new System.Drawing.Point(20, 221);
+            this.btnLoadModel.Location = new System.Drawing.Point(19, 315);
             this.btnLoadModel.Name = "btnLoadModel";
             this.btnLoadModel.Size = new System.Drawing.Size(120, 45);
             this.btnLoadModel.TabIndex = 9;
@@ -166,9 +171,57 @@ namespace RoboVision
             this.btnLoadModel.UseVisualStyleBackColor = true;
             this.btnLoadModel.Click += new System.EventHandler(this.btnLoadModel__Click);
             // 
+            // textTargetIP
+            // 
+            this.textTargetIP.Location = new System.Drawing.Point(20, 89);
+            this.textTargetIP.Name = "textTargetIP";
+            this.textTargetIP.Size = new System.Drawing.Size(119, 25);
+            this.textTargetIP.TabIndex = 10;
+            this.textTargetIP.Text = "127.0.0.1";
+            // 
+            // textTargetPort
+            // 
+            this.textTargetPort.Location = new System.Drawing.Point(20, 120);
+            this.textTargetPort.Name = "textTargetPort";
+            this.textTargetPort.Size = new System.Drawing.Size(119, 25);
+            this.textTargetPort.TabIndex = 11;
+            this.textTargetPort.Text = "8001";
+            // 
+            // DesLabel
+            // 
+            this.DesLabel.AutoSize = true;
+            this.DesLabel.Location = new System.Drawing.Point(9, 68);
+            this.DesLabel.Name = "DesLabel";
+            this.DesLabel.Size = new System.Drawing.Size(151, 15);
+            this.DesLabel.TabIndex = 12;
+            this.DesLabel.Text = "目标服务器IP与端口:";
+            // 
+            // ListenPortLabel
+            // 
+            this.ListenPortLabel.AutoSize = true;
+            this.ListenPortLabel.Location = new System.Drawing.Point(9, 43);
+            this.ListenPortLabel.Name = "ListenPortLabel";
+            this.ListenPortLabel.Size = new System.Drawing.Size(144, 15);
+            this.ListenPortLabel.TabIndex = 13;
+            this.ListenPortLabel.Text = "程序监听端口：8001";
+            // 
+            // sourcePortLabel
+            // 
+            this.sourcePortLabel.AutoSize = true;
+            this.sourcePortLabel.Location = new System.Drawing.Point(9, 20);
+            this.sourcePortLabel.Name = "sourcePortLabel";
+            this.sourcePortLabel.Size = new System.Drawing.Size(144, 15);
+            this.sourcePortLabel.TabIndex = 14;
+            this.sourcePortLabel.Text = "程序发送端口：8000";
+            // 
             // MainForm
             // 
             this.ClientSize = new System.Drawing.Size(1466, 752);
+            this.Controls.Add(this.sourcePortLabel);
+            this.Controls.Add(this.ListenPortLabel);
+            this.Controls.Add(this.DesLabel);
+            this.Controls.Add(this.textTargetPort);
+            this.Controls.Add(this.textTargetIP);
             this.Controls.Add(this.btnLoadModel);
             this.Controls.Add(this.pictureBoxProcessed);
             this.Controls.Add(this.textBoxCoordinates);
@@ -192,6 +245,11 @@ namespace RoboVision
 
         private PictureBox pictureBoxProcessed;
         private Button btnLoadModel;
+        private TextBox textTargetIP;
+        private TextBox textTargetPort;
+        private Label DesLabel;
+        private Label ListenPortLabel;
+        private Label sourcePortLabel;
     }
 }
 

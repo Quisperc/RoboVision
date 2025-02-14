@@ -6,8 +6,10 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -25,6 +27,10 @@ namespace RoboVision
         private bool _isProcessing;
         private Mat _currentFrame; // 用于存储当前帧
 
+        private string _commsTargetIP = "127.0.0.1";
+        private int _commsTargetPort = 8001;
+        private int _commsSourcePort = 8000;
+
         public MainForm()
         {
             InitializeComponent();
@@ -34,15 +40,22 @@ namespace RoboVision
 
         private void InitializeModules()
         {
-            // 初始化相机模块
-            _camera = new CameraController();
+            try
+            {
+                // 初始化相机模块
+                _camera = new CameraController();
 
-            // 初始化深度学习模块
-            _dlModel = new DeepLearningModel();
+                // 初始化深度学习模块
+                _dlModel = new DeepLearningModel();
 
-            // 初始化通信模块
-            _comms = new CommunicationModule();
-            _comms.StartServer("127.0.0.1", 8000);
+                // 初始化通信模块
+                _comms = new CommunicationModule();
+                Task task = _comms.StartReceiveServerAsync();
+            }
+            catch (Exception ex)
+            {
+                HandleError($"模块初始化失败：{ex.Message}", false);
+            }
         }
 
         private void SetupEventHandlers()
@@ -155,7 +168,7 @@ namespace RoboVision
             {
                 //CaptureFrame();
                 GetCurrentFrame();
-                if(_currentFrame==null)
+                if (_currentFrame == null)
                 {
                     UpdateStatus("当前帧 _currentFrame 为空", myMsg.none, LogLevel.Warning);
                 }
@@ -292,6 +305,7 @@ namespace RoboVision
                 }
             });
         }
+
         private void GetCurrentFrame()
         {
             // 使用SafeInvoke确保线程安全, 但是这里不需要，使用之后_currentFrame为空，UI线程没有成功参与？
@@ -363,7 +377,14 @@ namespace RoboVision
             });
         }
 
-        private void SendDetectionResults(List<BoundingBox> detections)
+        // 获取目的服务器IP地址和端口号
+        private void GetTargetServer(out string targetIp, out int targetPort)
+        {
+            targetIp = textTargetIP.Text;
+            targetPort = Convert.ToInt32(textTargetPort.Text);
+        }
+        // 发送检测结果至服务器
+        private async void SendDetectionResults(List<BoundingBox> detections)
         {
             try
             {
@@ -372,20 +393,28 @@ namespace RoboVision
                 {
                     var dataLine = $"{box.Label},{box.Confidence:F2},{box.Rect.X},{box.Rect.Y},{box.Rect.Width},{box.Rect.Height}";
                     sb.AppendLine(dataLine);
-                    UpdateStatus($"准备发送：{dataLine}", myMsg.none, LogLevel.Info);
                 });
 
-                UpdateStatus("发送至服务器 127.0.0.1:8000 中......", myMsg.none, LogLevel.Info);
+                UpdateStatus($"检测结果：{sb}", myMsg.none, LogLevel.Info);
 
-                // 使用Task避免阻塞UI线程
-                Task.Run(() => _comms.SendToClient("127.0.0.1", 8000, sb.ToString()))
-                    .ContinueWith(t =>
-                    {
-                        if (t.IsFaulted)
-                        {
-                            UpdateStatus($"发送失败：{t.Exception?.InnerException?.Message}", myMsg.none, LogLevel.Error);
-                        }
-                    });
+                // 异步广播并等待结果
+                // 修改 GetTargetServer 调用，添加 out 关键字
+                GetTargetServer(out _commsTargetIP, out _commsTargetPort);
+                //_comms.StartServersAsync();
+                await _comms.SendDataAsync(_commsTargetIP, _commsTargetPort, sb.ToString());
+                UpdateStatus("数据已广播至所有连接的客户端", myMsg.none, LogLevel.Info);
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateStatus("发送操作已取消", myMsg.none, LogLevel.Warning);
+            }
+            catch (SocketException ex)
+            {
+                UpdateStatus($"网络错误：{ex.SocketErrorCode}", myMsg.none, LogLevel.Error);
+            }
+            catch (IOException ex)
+            {
+                UpdateStatus($"IO异常：{ex.Message}", myMsg.none, LogLevel.Error);
             }
             catch (Exception ex)
             {
@@ -393,7 +422,8 @@ namespace RoboVision
             }
         }
 
-        private void UpdateStatus(string message, myMsg mymsg = myMsg.none , LogLevel level = LogLevel.Info)
+
+        private void UpdateStatus(string message, myMsg mymsg = myMsg.none, LogLevel level = LogLevel.Info)
         {
             if (mymsg == myMsg.Camera_connected)
             {
@@ -496,7 +526,7 @@ namespace RoboVision
                     var img = pictureBoxDisplay.Image;
                     pictureBoxDisplay.Image = null;
                     img?.Dispose();
-                    var imgPro = pictureBoxProcessed .Image;
+                    var imgPro = pictureBoxProcessed.Image;
                     pictureBoxProcessed.Image = null;
                     imgPro?.Dispose();
                 }
