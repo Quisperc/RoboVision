@@ -31,6 +31,7 @@ namespace RoboVision
         public event EventHandler<Bitmap> FrameUpdated;
         public event EventHandler<string> CaptureCompleted;
         public event EventHandler<string> ErrorOccurred;
+        public event EventHandler<string> ConnectingCamera;
 
         public List<string> AvailableCameras { get; } = new List<string>();
         public List<Size> AvailableResolutions { get; } = new List<Size>();
@@ -84,7 +85,7 @@ namespace RoboVision
             StopCamera();
             _selectedCameraIndex = cameraIndex;
             DeviceName = AvailableCameras[cameraIndex];
-
+            ConnectingCamera?.Invoke(this, DeviceName);
             // 获取设备支持的分辨率
             InitializeResolutions();
 
@@ -249,13 +250,6 @@ namespace RoboVision
             }
         }
 
-        //public void StopCamera()
-        //{
-        //    _isRunning = false;
-        //     _captureThread?.Join(1000);
-        //    _videoCapture?.Release();
-        //    _videoCapture = null;     // 将引用置空
-        //}
         public void StopCamera()
         {
             _isRunning = false;
@@ -311,23 +305,44 @@ namespace RoboVision
             }
         }
 
-        public void CaptureFrame()
+        private readonly object _frameLock = new object(); // 新增锁对象
+        public Mat CaptureFrame()
         {
+            Mat frameCopy = null;
+            Mat frameCopyuse = null;
             try
             {
-                if (_currentFrame == null || _currentFrame.Empty()) return;
+                lock (_frameLock) // 加锁保证线程安全
+                {
+                    // 检查对象有效性
+                    if (_currentFrame == null || _currentFrame.IsDisposed || _currentFrame.Empty())
+                        return null;
+
+                    // 创建深度拷贝
+                    frameCopy = _currentFrame.Clone();
+                    // 用于保存用来深度学习的对象
+                    frameCopyuse?.Dispose();
+                    frameCopyuse = _currentFrame.Clone();
+                }
 
                 var savePath = GetUniqueFilePath();
-                using (var bitmap = BitmapConverter.ToBitmap(_currentFrame))
+                using (var bitmap = BitmapConverter.ToBitmap(frameCopy))
                 {
                     EnsureDirectoryExists(savePath);
                     bitmap.Save(savePath, ImageFormat.Jpeg);
                 }
                 CaptureCompleted?.Invoke(this, savePath);
+                return frameCopyuse;
             }
             catch (Exception ex)
             {
                 OnErrorOccurred($"捕获失败: {ex.Message}");
+                return null; // 确保在异常情况下返回值
+            }
+            finally
+            {
+                frameCopy?.Dispose(); // 确保临时拷贝被释放
+                //frameCopyuse?.Dispose(); // 不能释放，否则返回的对象无效
             }
         }
 

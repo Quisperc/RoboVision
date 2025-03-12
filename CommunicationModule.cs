@@ -1,101 +1,168 @@
-﻿// ======================== 通信模块 CommunicationModule.cs ========================
+﻿// ======================== CommunicationModule.cs ========================
 using System;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace RoboVision
 {
     public class CommunicationModule : IDisposable
     {
+        // 接收服务器配置
+        private const int RECEIVE_PORT = 8001;
+        private TcpListener _receiveServer;
+        private CancellationTokenSource _cts = new CancellationTokenSource();
+
+        // 接收客户端管理
+        private ConcurrentDictionary<TcpClient, byte> _receiveClients = new ConcurrentDictionary<TcpClient, byte>();
+
+        // 事件定义
         public event EventHandler<string> DataReceived;
         public event EventHandler<string> StatusChanged;
 
-        private TcpListener _server;
-        private bool _running;
-        private Thread _listenerThread;
-
-        public void StartServer(string ip, int port)
+        /// <summary>
+        /// 启动接收服务器
+        /// </summary>
+        //public async Task StartReceiveServerAsync(string ip = "127.0.0.1")
+        //{
+        //    try
+        //    {
+        //        _receiveServer = new TcpListener(IPAddress.Parse(ip), RECEIVE_PORT);
+        //        _receiveServer.Start();
+        //        _ = ListenForReceiveClientsAsync();
+        //        StatusChanged?.Invoke(this, $"接收服务器已启动 {ip}:{RECEIVE_PORT}");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        StatusChanged?.Invoke(this, $"服务器启动失败：{ex.Message}");
+        //        throw;
+        //    }
+        //}
+        public async Task StartReceiveServerAsync(string ip = "127.0.0.1")
         {
             try
             {
-                _server = new TcpListener(IPAddress.Parse(ip), port);
-                _server.Start();
-                _running = true;
+                _receiveServer = new TcpListener(IPAddress.Parse(ip), RECEIVE_PORT);
+                _receiveServer.Start();
 
-                _listenerThread = new Thread(ListenForClients)
+                // 创建独立监控任务
+                var listenTask = ListenForReceiveClientsAsync();
+
+                // 注册异常监控
+                _ = listenTask.ContinueWith(t =>
                 {
-                    IsBackground = true
-                };
-                _listenerThread.Start();
+                    if (t.Exception != null)
+                    {
+                        StatusChanged?.Invoke(this, $"监听异常：{t.Exception.Flatten().InnerException.Message}");
+                    }
+                }, TaskContinuationOptions.OnlyOnFaulted);
 
-                StatusChanged?.Invoke(this, $"服务器已启动 {ip}:{port}");
+                StatusChanged?.Invoke(this, $"接收服务器已启动 {ip}:{RECEIVE_PORT}");
+
+                // 保持异步上下文（根据需求二选一）
+                await listenTask; // 方案1：等待任务完成（适合需要同步启动的场景）
+                // return listenTask; // 方案2：返回任务本身（保持完全异步） 
             }
             catch (Exception ex)
             {
-                StatusChanged?.Invoke(this, $"启动失败：{ex.Message}");
+                StatusChanged?.Invoke(this, $"服务器启动失败：{ex.Message}");
+                throw;
             }
         }
 
-        private void ListenForClients()
+        /// <summary>
+        /// 监听接收客户端连接
+        /// </summary>
+        private async Task ListenForReceiveClientsAsync()
         {
-            while (_running)
+            try
+            {
+                while (!_cts.IsCancellationRequested)
+                {
+                    var client = await _receiveServer.AcceptTcpClientAsync();
+                    _receiveClients.TryAdd(client, 0);
+                    _ = HandleReceiveClientAsync(client);
+                }
+            }
+            catch (ObjectDisposedException) { /* 正常停止 */ }
+        }
+
+        /// <summary>
+        /// 处理接收客户端数据
+        /// </summary>
+        private async Task HandleReceiveClientAsync(TcpClient client)
+        {
+            try
+            {
+                using (client)
+                using (var stream = client.GetStream())
+                {
+                    var buffer = new byte[4096];
+                    StatusChanged?.Invoke(this, $"客户端已连接 {client.Client.RemoteEndPoint}");
+
+                    while (!_cts.IsCancellationRequested)
+                    {
+                        int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, _cts.Token);
+                        if (bytesRead == 0) break;
+
+                        var message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                        DataReceived?.Invoke(this, message);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusChanged?.Invoke(this, $"接收错误：{ex.Message}");
+            }
+            finally
+            {
+                _receiveClients.TryRemove(client, out _);
+                StatusChanged?.Invoke(this, $"客户端断开");
+            }
+        }
+
+        /// <summary>
+        /// 发送数据到指定端点（客户端模式）
+        /// </summary>
+        public async Task SendDataAsync(string targetIp, int targetPort, string message)
+        {
+            using (var client = new TcpClient()) // 修改的关键点
             {
                 try
                 {
-                    var client = _server.AcceptTcpClient();
-                    ThreadPool.QueueUserWorkItem(HandleClient, client);
+                    await client.ConnectAsync(targetIp, targetPort);
+                    var data = Encoding.UTF8.GetBytes(message);
+                    await client.GetStream().WriteAsync(data, 0, data.Length);
+                    StatusChanged?.Invoke(this, $"成功发送到 {targetIp}:{targetPort}");
                 }
-                catch (SocketException)
+                catch (Exception ex)
                 {
-                    break;
+                    StatusChanged?.Invoke(this, $"发送到 {targetIp}:{targetPort} 失败：{ex.Message}");
+                    throw;
                 }
-            }
-        }
-
-        private void HandleClient(object state)
-        {
-            var client = (TcpClient)state;
-            try
-            {
-                var stream = client.GetStream();
-                var buffer = new byte[4096];
-                int bytesRead;
-
-                while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
-                {
-                    var message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                    DataReceived?.Invoke(this, message);
-                }
-            }
-            catch (Exception ex)
-            {
-                StatusChanged?.Invoke(this, $"客户端错误：{ex.Message}");
-            }
-        }
-
-        public void SendToClient(string ip, int port, string message)
-        {
-            try
-            {
-                var client = new TcpClient(ip, port);
-                var stream = client.GetStream();
-                var data = Encoding.UTF8.GetBytes(message);
-                stream.Write(data, 0, data.Length);
-                StatusChanged?.Invoke(this, $"数据已发送至 {ip}:{port}");
-            }
-            catch (Exception ex)
-            {
-                StatusChanged?.Invoke(this, $"发送失败：{ex.Message}");
             }
         }
 
         public void Dispose()
         {
-            _running = false;
-            _server?.Stop();
-            _listenerThread?.Join(1000);
+            try
+            {
+                _cts.Cancel();
+                _receiveServer?.Stop();
+                // 关闭所有接收客户端
+                foreach (var client in _receiveClients.Keys)
+                {
+                    client.Dispose();
+                }
+                _receiveClients.Clear();
+            }
+            catch (Exception ex)
+            {
+                StatusChanged?.Invoke(this, $"释放资源错误：{ex.Message}");
+            }
         }
     }
 }
