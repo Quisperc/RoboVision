@@ -14,7 +14,7 @@ using System.Threading;
 using FormatType = DirectShowLib.FormatType;
 using Size = System.Drawing.Size;
 
-namespace RoboVision
+namespace RailwayRoadSectionDetection
 {
     public class CameraController : IDisposable
     {

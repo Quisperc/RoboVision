@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.12.35527.113
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoboVision", "RoboVision.csproj", "{F13CABC6-4CC7-4F0C-AEC9-C2C8BB73216B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RailwayRoadSectionDetection", "RailwayRoadSectionDetection.csproj", "{F13CABC6-4CC7-4F0C-AEC9-C2C8BB73216B}"
 EndProject
 Project("{54435603-DBB4-11D2-8724-00A0C9A8B90C}") = "RoboVisionApp", "..\RoboVisionApp\RoboVisionApp.vdproj", "{30253574-52D9-4B52-BE52-74ABD84C19CF}"
 EndProject

@@ -5,7 +5,7 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace RoboVision
+namespace RailwayRoadSectionDetection
 {
     public partial class ParameterInputForm : Form
     {

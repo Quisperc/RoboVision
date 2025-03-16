@@ -1,4 +1,4 @@
-﻿namespace RoboVision
+﻿namespace RailwayRoadSectionDetection
 {
     partial class CameraSelection
     {

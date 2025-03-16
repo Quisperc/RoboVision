@@ -1,6 +1,6 @@
 ﻿using System.Windows.Forms;
 
-namespace RoboVision
+namespace RailwayRoadSectionDetection
 {
     partial class MainForm
     {

@@ -1,7 +1,7 @@
 ﻿using System.Drawing;
 using System.Windows.Forms;
 
-namespace RoboVision
+namespace RailwayRoadSectionDetection
 {
     public partial class ImageProcessor : Form
     {

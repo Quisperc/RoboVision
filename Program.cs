@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Windows.Forms;
 
-namespace RoboVision
+namespace RailwayRoadSectionDetection
 {
     internal static class Program
     {

@@ -14,7 +14,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace RoboVision
+namespace RailwayRoadSectionDetection
 {
     public partial class MainForm : Form
     {

@@ -10,7 +10,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 
-namespace RoboVision
+namespace RailwayRoadSectionDetection
 {
     public class DeepLearningModel : IDisposable
     {
