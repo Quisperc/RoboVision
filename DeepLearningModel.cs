@@ -56,7 +56,12 @@ namespace RoboVision
         {
             try
             {
-                _session?.Dispose();
+                // 释放之前的会话资源
+                if (_session != null)
+                {
+                    _session.Dispose();
+                    _session = null;
+                }
 
                 var sessionOptions = new SessionOptions();
                 try
@@ -71,8 +76,8 @@ namespace RoboVision
                 }
 
                 _session = new InferenceSession(modelPath, sessionOptions);
-                // 关闭
-                sessionOptions?.Close();
+                // 关闭并释放会话选项资源
+                sessionOptions?.Dispose();
                 //ModelLoaded?.Invoke(this, $"成功加载模型：{modelPath}");
 
                 // 获取模型输出维度信息
@@ -123,25 +128,68 @@ namespace RoboVision
             {
                 float ratio;
                 (int top, int left) pad;
-                var inputTensor = PreprocessFrame(frame, out ratio, out pad);
-                var inputs = new List<NamedOnnxValue>
-                {
-                    NamedOnnxValue.CreateFromTensor("images", inputTensor)
-                };
+                Bitmap resizedBitmap = null;
+                DetectionResult detectionResult = null;
+                Bitmap processedImage = null;
+                Bitmap frameClone = null;
 
-                using (var results = _session.Run(inputs))
+                try
                 {
-                    var output = results.First().AsTensor<float>();
-                    var detections = ParseOutput(output, ratio, pad, frame.Width, frame.Height);
-
-                    InferenceCompleted?.Invoke(this, $"检测到 {detections.Count} 个目标");
-                    var detectionResult = new DetectionResult
+                    // 克隆输入帧，避免修改原始对象
+                    frameClone = (Bitmap)frame.Clone();
+                    
+                    // 预处理并获取输入张量
+                    var inputTensor = PreprocessFrame(frameClone, out ratio, out pad, out resizedBitmap);
+                    
+                    // 创建输入列表
+                    var inputs = new List<NamedOnnxValue>
                     {
-                        ProcessedImage = PostProcessFrame((Bitmap)frame.Clone(), detections),
-                        Detections = detections
+                        NamedOnnxValue.CreateFromTensor("images", inputTensor)
                     };
-                    saveProceed(detectionResult.ProcessedImage);
+
+                    // 执行模型推理
+                    using (var results = _session.Run(inputs))
+                    {
+                        // 获取输出并解析
+                        var output = results.First().AsTensor<float>();
+                        var detections = ParseOutput(output, ratio, pad, frameClone.Width, frameClone.Height);
+
+                        // 通知结果
+                        InferenceCompleted?.Invoke(this, $"检测到 {detections.Count} 个目标");
+                        
+                        // 后处理图像
+                        processedImage = PostProcessFrame(frameClone, detections);
+                        
+                        // 创建结果对象
+                        detectionResult = new DetectionResult
+                        {
+                            ProcessedImage = processedImage,
+                            Detections = detections
+                        };
+                        
+                        // 所有权转移，防止提前释放
+                        processedImage = null;
+                        
+                        // 保存处理结果
+                        SaveProcessedImage(detectionResult.ProcessedImage);
+                    }
+
                     return detectionResult;
+                }
+                catch (Exception ex)
+                {
+                    processedImage?.Dispose();
+                    throw new Exception($"处理图像失败: {ex.Message}", ex);
+                }
+                finally
+                {
+                    // 确保中间资源被释放
+                    resizedBitmap?.Dispose();
+                    if (frameClone != null && frameClone != processedImage && 
+                        (detectionResult == null || frameClone != detectionResult.ProcessedImage))
+                    {
+                        frameClone.Dispose();
+                    }
                 }
             }
             catch (Exception ex)
@@ -151,19 +199,18 @@ namespace RoboVision
             }
         }
 
-        // 预处理图像
-        private Tensor<float> PreprocessFrame(Bitmap frame, out float ratio, out (int top, int left) pad)
+        // 预处理图像，创建适合模型输入的张量
+        private Tensor<float> PreprocessFrame(Bitmap frame, out float ratio, out (int top, int left) pad, out Bitmap resized)
         {
             // 计算缩放比例
             ratio = Math.Min((float)TargetSize / frame.Width, (float)TargetSize / frame.Height);
             var newWidth = (int)(frame.Width * ratio);
             var newHeight = (int)(frame.Height * ratio);
-            //pad = ((TargetSize - newHeight) / 2, (TargetSize - newWidth) / 2);
             // 使用+1修正边界问题，保证不会出现负数，非对称填充
             pad = ((TargetSize - newHeight + 1) / 2, (TargetSize - newWidth + 1) / 2);
 
             // 创建Letterbox图像
-            var resized = new Bitmap(TargetSize, TargetSize);
+            resized = new Bitmap(TargetSize, TargetSize);
             using (var g = Graphics.FromImage(resized))
             {
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic; // 高质量插值
@@ -178,27 +225,31 @@ namespace RoboVision
             var bitmapData = resized.LockBits(new Rectangle(0, 0, resized.Width, resized.Height),
                 ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
 
-            unsafe
+            try
             {
-                byte* p = (byte*)bitmapData.Scan0;
-                for (int y = 0; y < bitmapData.Height; y++)
+                unsafe
                 {
-                    for (int x = 0; x < bitmapData.Width; x++)
+                    byte* p = (byte*)bitmapData.Scan0;
+                    for (int y = 0; y < bitmapData.Height; y++)
                     {
-                        //// 输入通道顺序为RGB，归一化到0-1范围
-                        inputTensor[0, 0, y, x] = p[2] / 255f; // R
-                        inputTensor[0, 1, y, x] = p[1] / 255f; // G 
-                        inputTensor[0, 2, y, x] = p[0] / 255f; // B
-                        // 使用BGR通道顺序
-                        //inputTensor[0, 0, y, x] = p[0] / 255f; // B
-                        //inputTensor[0, 1, y, x] = p[1] / 255f; // G
-                        //inputTensor[0, 2, y, x] = p[2] / 255f; // R
-                        p += 3;
+                        for (int x = 0; x < bitmapData.Width; x++)
+                        {
+                            // 输入通道顺序为RGB，归一化到0-1范围
+                            inputTensor[0, 0, y, x] = p[2] / 255f; // R
+                            inputTensor[0, 1, y, x] = p[1] / 255f; // G 
+                            inputTensor[0, 2, y, x] = p[0] / 255f; // B
+                            p += 3;
+                        }
+                        p += bitmapData.Stride - bitmapData.Width * 3;
                     }
-                    p += bitmapData.Stride - bitmapData.Width * 3;
                 }
             }
-            resized.UnlockBits(bitmapData);
+            finally
+            {
+                // 确保位图数据解锁
+                resized.UnlockBits(bitmapData);
+            }
+            
             return inputTensor;
         }
         private List<BoundingBox> ParseOutput(Tensor<float> output, float ratio, (int top, int left) pad,
@@ -335,60 +386,114 @@ namespace RoboVision
 
         private Bitmap PostProcessFrame(Bitmap frame, List<BoundingBox> boxes)
         {
+            // 确保使用高质量的绘图
             using (var g = Graphics.FromImage(frame))
             {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                
                 foreach (var box in boxes)
                 {
-                    // 绘制边界框
-                    using (var pen = new Pen(Color.Red, 2))
+                    // 为每个类别分配不同颜色
+                    Color boxColor = GetColorForClass(box.Label);
+                    using (var pen = new Pen(boxColor, 2))
+                    using (var brush = new SolidBrush(Color.FromArgb(128, boxColor)))
+                    using (var textBrush = new SolidBrush(Color.White))
+                    using (var textFont = new Font("Arial", 10, FontStyle.Bold))
                     {
-                        // g.DrawRectangle(pen, box.Rect);
-                        // 当绘制半像素偏移时可能出现错位，使用浮点坐标
-                        g.DrawRectangle(pen,
-                            box.Rect.X + 0.5f,
-                            box.Rect.Y + 0.5f,
-                            box.Rect.Width - 1,
-                            box.Rect.Height - 1);
+                        // 画框
+                        g.DrawRectangle(pen, box.Rect);
+                        
+                        // 绘制标签背景
+                        string text = $"{box.Label} {box.Confidence:P1}";
+                        SizeF textSize = g.MeasureString(text, textFont);
+                        g.FillRectangle(brush, box.Rect.X, box.Rect.Y - textSize.Height, textSize.Width, textSize.Height);
+                        
+                        // 绘制标签文本
+                        g.DrawString(text, textFont, textBrush, box.Rect.X, box.Rect.Y - textSize.Height);
                     }
-
-                    // 绘制标签
-                    string label = $"{box.Label} {box.Confidence:0.00}";
-                    var size = g.MeasureString(label, SystemFonts.DefaultFont);
-                    g.FillRectangle(Brushes.Red,
-                        new RectangleF(box.Rect.Left, box.Rect.Top - size.Height,
-                        size.Width, size.Height));
-                    g.DrawString(label, SystemFonts.DefaultFont, Brushes.White,
-                        box.Rect.Left, box.Rect.Top - size.Height);
                 }
             }
             return frame;
         }
 
+        // 为不同类别分配不同颜色
+        private Color GetColorForClass(string label)
+        {
+            // 根据标签名称生成一个稳定的哈希值作为颜色索引
+            int hash = label.GetHashCode();
+            // 使用固定的颜色表
+            Color[] colors = new Color[] 
+            {
+                Color.Red, Color.Green, Color.Blue, Color.Yellow, Color.Cyan, 
+                Color.Magenta, Color.Orange, Color.Purple, Color.Lime, Color.Brown
+            };
+            
+            int index = Math.Abs(hash) % colors.Length;
+            return colors[index];
+        }
+
         public void Dispose()
         {
-            if (_disposed) return;
-
-            _session?.Dispose();
-            _disposed = true;
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
-        // 保存处理后的图像
-        public void saveProceed(Bitmap detectionResult)
+        
+        protected virtual void Dispose(bool disposing)
         {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    // 释放托管资源
+                    _session?.Dispose();
+                }
+                
+                // 释放非托管资源
+                _session = null;
+                _disposed = true;
+            }
+        }
+
+        public void SaveProcessedImage(Bitmap detectionResult)
+        {
+            if (detectionResult == null) return;
+
             try
             {
-                if (detectionResult == null) return;
-                // 获取唯一文件路径
-                var savePath = GetUniqueFilePath();
-                // 确保目录存在
-                EnsureDirectoryExists(savePath);
-                detectionResult.Save(savePath, ImageFormat.Jpeg);
-                ProceedCompleted?.Invoke(this, savePath);
+                string filePath = GetUniqueFilePath();
+                EnsureDirectoryExists(filePath);
+                
+                // 使用更高质量的JPEG编码
+                using (var encoderParams = new EncoderParameters(1))
+                using (var qualityParam = new EncoderParameter(Encoder.Quality, 95L))
+                {
+                    encoderParams.Param[0] = qualityParam;
+                    ImageCodecInfo jpegEncoder = GetEncoder(ImageFormat.Jpeg);
+                    detectionResult.Save(filePath, jpegEncoder, encoderParams);
+                }
+                
+                ProceedCompleted?.Invoke(this, filePath);
             }
             catch (Exception ex)
             {
-                OnErrorOccurred($"处理文件保存失败: {ex.Message}");
+                OnErrorOccurred($"保存处理后图像失败：{ex.Message}");
             }
         }
+
+        // 获取指定格式的编码器
+        private ImageCodecInfo GetEncoder(ImageFormat format)
+        {
+            ImageCodecInfo[] codecs = ImageCodecInfo.GetImageDecoders();
+            foreach (ImageCodecInfo codec in codecs)
+            {
+                if (codec.FormatID == format.Guid)
+                {
+                    return codec;
+                }
+            }
+            return null;
+        }
+
         // 获取唯一文件路径
         private static string GetUniqueFilePath()
         {
@@ -407,6 +512,18 @@ namespace RoboVision
         {
             ErrorOccurred?.Invoke(this, message);
         }
+
+        ~DeepLearningModel()
+        {
+            Dispose(false);
+        }
+
+        // 资源回收方法，手动触发
+        public void CleanupResources()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
     }
 
     public class DetectionResult
@@ -422,3 +539,4 @@ namespace RoboVision
         public Rectangle Rect { get; set; }   // 检测框位置和大小
     }
 }
+

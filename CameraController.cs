@@ -21,12 +21,11 @@ namespace RoboVision
         private VideoCapture _videoCapture;
         private Mat _currentFrame;
         private Thread _captureThread;
-        private bool _isRunning;
+        private volatile bool _isRunning;
         private bool _isDisposed;
         private Size _frameSize;
-
         private int _selectedCameraIndex;
-
+        private readonly object _captureLock = new object();
 
         public event EventHandler<Bitmap> FrameUpdated;
         public event EventHandler<string> CaptureCompleted;
@@ -38,6 +37,7 @@ namespace RoboVision
         public string DeviceName { get; private set; } = "未选择设备";
         public bool IsPreviewing => _isRunning;
         public Size CurrentResolution => _frameSize;
+
         public CameraController()
         {
             RefreshDevices();
@@ -45,33 +45,51 @@ namespace RoboVision
 
         public void RefreshDevices()
         {
-            _videoCapture?.Dispose();
-            _videoCapture = null;
-            _videoCapture = new VideoCapture();
-            AvailableCameras.Clear();
             try
             {
+                // 释放之前的摄像头资源
+                if (_videoCapture != null)
+                {
+                    StopCamera();
+                    _videoCapture.Dispose();
+                    _videoCapture = null;
+                }
+                
+                _videoCapture = new VideoCapture();
+                AvailableCameras.Clear();
+                
                 // 使用 DirectShow 获取设备名称
                 DsDevice[] devices = DsDevice.GetDevicesOfCat(FilterCategory.VideoInputDevice);
                 foreach (DsDevice device in devices)
                 {
                     AvailableCameras.Add(device.Name);
                 }
+                
+                // 如果没有找到设备，使用备用方法
+                if (AvailableCameras.Count == 0)
+                {
+                    FallbackDeviceEnumeration();
+                }
             }
             catch (Exception ex)
             {
-                // 记录错误但不要吞掉异常
+                // 记录错误并使用备用方法
                 Debug.WriteLine($"DirectShow设备枚举失败: {ex.Message}");
-                // 回退方法需要明确说明索引不可靠
-                for (int i = 0; i < 10; i++)
+                FallbackDeviceEnumeration();
+            }
+        }
+        
+        private void FallbackDeviceEnumeration()
+        {
+            // 备用方法：使用索引尝试打开摄像头
+            for (int i = 0; i < 10; i++)
+            {
+                using (var testCapture = new VideoCapture(i, VideoCaptureAPIs.DSHOW))
                 {
-                    using (var testCapture = new VideoCapture(i, VideoCaptureAPIs.DSHOW))
+                    if (testCapture.IsOpened())
                     {
-                        if (testCapture.IsOpened())
-                        {
-                            AvailableCameras.Add($"摄像头 {i + 1}");
-                            testCapture.Release();
-                        }
+                        AvailableCameras.Add($"摄像头 {i + 1}");
+                        testCapture.Release();
                     }
                 }
             }
@@ -86,25 +104,42 @@ namespace RoboVision
             _selectedCameraIndex = cameraIndex;
             DeviceName = AvailableCameras[cameraIndex];
             ConnectingCamera?.Invoke(this, DeviceName);
-            // 获取设备支持的分辨率
-            InitializeResolutions();
-
-            // 使用DirectShow后端初始化摄像头
-            _videoCapture = new VideoCapture(cameraIndex, VideoCaptureAPIs.DSHOW);
-
-            // 尝试设置最高分辨率（可选）
-            if (AvailableResolutions.Count > 0)
+            
+            try
             {
-                var maxRes = AvailableResolutions[0];
-                _videoCapture.Set(VideoCaptureProperties.FrameWidth, maxRes.Width);
-                _videoCapture.Set(VideoCaptureProperties.FrameHeight, maxRes.Height);
-            }
+                // 获取设备支持的分辨率
+                InitializeResolutions();
 
-            // 更新当前分辨率
-            _frameSize = new Size(
-                (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth),
-                (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight)
-            );
+                // 释放旧的VideoCapture实例
+                _videoCapture?.Dispose();
+                
+                // 使用DirectShow后端初始化摄像头
+                _videoCapture = new VideoCapture(cameraIndex, VideoCaptureAPIs.DSHOW);
+                
+                if (!_videoCapture.IsOpened())
+                {
+                    throw new InvalidOperationException($"无法打开摄像头 {DeviceName}");
+                }
+
+                // 尝试设置最高分辨率（可选）
+                if (AvailableResolutions.Count > 0)
+                {
+                    var maxRes = AvailableResolutions[0];
+                    _videoCapture.Set(VideoCaptureProperties.FrameWidth, maxRes.Width);
+                    _videoCapture.Set(VideoCaptureProperties.FrameHeight, maxRes.Height);
+                }
+
+                // 更新当前分辨率
+                _frameSize = new Size(
+                    (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth),
+                    (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight)
+                );
+            }
+            catch (Exception ex)
+            {
+                OnErrorOccurred($"选择摄像头失败: {ex.Message}");
+                throw;
+            }
         }
 
         private void InitializeResolutions()
@@ -121,6 +156,7 @@ namespace RoboVision
             DsDevice device = devices[_selectedCameraIndex];
             object sourceObj = null;
             IAMStreamConfig streamConfig = null;
+            IPin pin = null;
 
             try
             {
@@ -130,7 +166,7 @@ namespace RoboVision
                 IBaseFilter filter = (IBaseFilter)sourceObj;
 
                 // 获取输出Pin
-                IPin pin = DsFindPin.ByDirection(filter, PinDirection.Output, 0);
+                pin = DsFindPin.ByDirection(filter, PinDirection.Output, 0);
                 if (pin == null)
                 {
                     OnErrorOccurred("无法找到输出Pin。");
@@ -190,63 +226,138 @@ namespace RoboVision
             {
                 OnErrorOccurred($"获取分辨率失败: {ex.Message}");
                 // 添加默认回退分辨率
-                if (AvailableResolutions.Count == 0)
-                {
-                    AvailableResolutions.Add(new Size(
-                        (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth),
-                        (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight)));
-                }
+                AddDefaultResolutions();
             }
             finally
             {
+                // 释放COM对象
+                if (pin != null) Marshal.ReleaseComObject(pin);
                 if (streamConfig != null) Marshal.ReleaseComObject(streamConfig);
                 if (sourceObj != null) Marshal.ReleaseComObject(sourceObj);
+            }
+            
+            // 确保至少有一个分辨率可用
+            if (AvailableResolutions.Count == 0)
+            {
+                AddDefaultResolutions();
+            }
+        }
+        
+        private void AddDefaultResolutions()
+        {
+            // 添加一些常用分辨率作为备选
+            if (_videoCapture != null && _videoCapture.IsOpened())
+            {
+                AvailableResolutions.Add(new Size(
+                    (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth),
+                    (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight)));
+            }
+            
+            // 添加常见分辨率
+            HashSet<Size> defaultResolutions = new HashSet<Size>
+            {
+                new Size(640, 480),   // VGA
+                new Size(1280, 720),  // HD
+                new Size(1920, 1080)  // Full HD
+            };
+            
+            foreach (var res in defaultResolutions)
+            {
+                if (!AvailableResolutions.Any(r => r.Width == res.Width && r.Height == res.Height))
+                {
+                    AvailableResolutions.Add(res);
+                }
             }
         }
 
         public void StartPreview()
         {
-            if (_videoCapture == null || !_videoCapture.IsOpened())
-                throw new InvalidOperationException("摄像头未初始化");
+            if (_isRunning)
+                return;
 
-            if (_isRunning) return;
+            if (_videoCapture == null || !_videoCapture.IsOpened())
+            {
+                OnErrorOccurred("摄像头未初始化或未打开");
+                return;
+            }
 
             _isRunning = true;
             _captureThread = new Thread(CaptureLoop)
             {
-                IsBackground = true
+                IsBackground = true,
+                Name = "CameraCapture"
             };
             _captureThread.Start();
         }
 
         private void CaptureLoop()
         {
-            while (_isRunning)
+            try
             {
-                try
+                using (var frame = new Mat())
                 {
-                    using (var frame = new Mat()) // 使用 using 确保 Mat 释放
+                    while (_isRunning && !_isDisposed)
                     {
-                        if (_videoCapture.Read(frame) && !frame.Empty())
+                        // 防止视频捕获设备被意外释放
+                        if (_videoCapture == null || !_videoCapture.IsOpened())
                         {
-                            _currentFrame?.Dispose();
-                            _currentFrame = frame.Clone();
-                            _frameSize = new Size(frame.Width, frame.Height);
+                            OnErrorOccurred("摄像头连接已丢失");
+                            break;
+                        }
 
-                            using (var bitmap = BitmapConverter.ToBitmap(frame))
+                        // 尝试读取帧
+                        bool hasFrame;
+                        lock (_captureLock)
+                        {
+                            hasFrame = _videoCapture.Read(frame);
+                        }
+
+                        if (!hasFrame || frame.Empty())
+                        {
+                            Thread.Sleep(10);
+                            continue;
+                        }
+
+                        // 创建Bitmap用于UI显示（避免跨线程访问同一个Mat对象）
+                        try
+                        {
+                            // 修复内存泄漏：确保Bitmap被正确释放
+                            using (Bitmap frameBitmap = BitmapConverter.ToBitmap(frame))
                             {
-                                var clonedBitmap = (Bitmap)bitmap.Clone();
-                                FrameUpdated?.Invoke(this, clonedBitmap);
+                                // 使用克隆防止跨线程访问问题
+                                Bitmap displayBitmap = (Bitmap)frameBitmap.Clone();
+                                FrameUpdated?.Invoke(this, displayBitmap);
+                                
+                                // 注意：这里异步传递了displayBitmap，必须确保它在UI线程中被正确释放
+                                // 由事件处理器负责释放displayBitmap
                             }
                         }
+                        catch (Exception ex)
+                        {
+                            OnErrorOccurred($"帧转换错误: {ex.Message}");
+                        }
+
+                        // 控制帧率
+                        Thread.Sleep(15); // ~60fps
+                        
+                        // 强制GC收集，减轻内存压力(仅在debug模式使用，生产环境移除)
+                        #if DEBUG
+                        if (DateTime.Now.Second % 10 == 0) // 每10秒执行一次
+                        {
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
+                        }
+                        #endif
                     }
-                    Thread.Sleep(33);
                 }
-                catch (Exception ex)
-                {
-                    OnErrorOccurred($"捕获错误: {ex.Message}");
-                    _isRunning = false;
-                }
+            }
+            catch (Exception ex)
+            {
+                OnErrorOccurred($"预览循环异常: {ex.Message}");
+            }
+            finally
+            {
+                _isRunning = false;
             }
         }
 
@@ -254,109 +365,185 @@ namespace RoboVision
         {
             _isRunning = false;
 
-            // 停止捕获线程
             if (_captureThread != null && _captureThread.IsAlive)
             {
-                if (!_captureThread.Join(2000))
+                try
                 {
-                    try { _captureThread.Interrupt(); }
-                    catch { /* Ignore thread state exceptions */ }
+                    _captureThread.Join(500); // 等待线程结束
+                    if (_captureThread.IsAlive)
+                    {
+                        // 如果线程仍在运行，记录但不中止（避免不安全的线程终止）
+                        Debug.WriteLine("警告: 相机捕获线程未能在500ms内停止");
+                    }
                 }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"停止捕获线程异常: {ex.Message}");
+                }
+                _captureThread = null;
             }
-
-            // 仅释放当前帧，保留摄像头实例
-            _currentFrame?.Dispose();
-            _currentFrame = null;
         }
 
         public void SetResolution(Size resolution)
         {
-            if (!AvailableResolutions.Contains(resolution))
-                throw new ArgumentException("不支持的分辨率");
-
-            bool wasRunning = IsPreviewing;
-
-            try
+            if (_videoCapture == null || !_videoCapture.IsOpened())
             {
-                if (wasRunning)
+                OnErrorOccurred("设置分辨率失败：摄像头未初始化或未打开");
+                return;
+            }
+
+            lock (_captureLock)
+            {
+                try
+                {
+                    // 停止预览
+                    bool wasRunning = _isRunning;
                     StopCamera();
 
-                _videoCapture.Set(VideoCaptureProperties.FrameWidth, resolution.Width);
-                _videoCapture.Set(VideoCaptureProperties.FrameHeight, resolution.Height);
+                    // 设置分辨率
+                    _videoCapture.Set(VideoCaptureProperties.FrameWidth, resolution.Width);
+                    _videoCapture.Set(VideoCaptureProperties.FrameHeight, resolution.Height);
 
-                // 验证分辨率设置
-                double actualWidth = _videoCapture.Get(VideoCaptureProperties.FrameWidth);
-                double actualHeight = _videoCapture.Get(VideoCaptureProperties.FrameHeight);
+                    // 验证实际设置的分辨率
+                    int actualWidth = (int)_videoCapture.Get(VideoCaptureProperties.FrameWidth);
+                    int actualHeight = (int)_videoCapture.Get(VideoCaptureProperties.FrameHeight);
+                    _frameSize = new Size(actualWidth, actualHeight);
 
-                if (actualWidth != resolution.Width || actualHeight != resolution.Height)
-                    throw new ArgumentException("分辨率设置失败");
+                    // 记录实际分辨率与请求分辨率的差异
+                    if (actualWidth != resolution.Width || actualHeight != resolution.Height)
+                    {
+                        Debug.WriteLine($"警告: 请求分辨率 {resolution.Width}x{resolution.Height} " +
+                                       $"实际设置为 {actualWidth}x{actualHeight}");
+                    }
 
-                _frameSize = resolution;
-
-            }
-            catch (Exception ex)
-            {
-                OnErrorOccurred($"分辨率设置失败: {ex.Message}");
-            }
-            finally
-            {
-                if (wasRunning)
-                    StartPreview();
+                    // 重新启动预览
+                    if (wasRunning)
+                    {
+                        StartPreview();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnErrorOccurred($"设置分辨率失败: {ex.Message}");
+                    throw;
+                }
             }
         }
 
         private readonly object _frameLock = new object(); // 新增锁对象
+        
         public Mat CaptureFrame()
         {
-            Mat frameCopy = null;
-            Mat frameCopyuse = null;
+            if (_videoCapture == null || !_videoCapture.IsOpened())
+            {
+                OnErrorOccurred("摄像头未初始化");
+                return null;
+            }
+
+            lock (_captureLock)
+            {
+                try
+                {
+                    var frame = new Mat();
+                    
+                    // 尝试读取多帧以跳过缓冲区中的旧帧
+                    for (int i = 0; i < 3; i++)
+                    {
+                        if (!_videoCapture.Read(frame) || frame.Empty())
+                        {
+                            Thread.Sleep(10);
+                        }
+                    }
+                    
+                    // 读取最新帧
+                    if (!_videoCapture.Read(frame) || frame.Empty())
+                    {
+                        frame.Dispose();
+                        OnErrorOccurred("无法捕获帧");
+                        return null;
+                    }
+
+                    // 拍照时保存到文件
+                    SaveFrameToFile(frame);
+
+                    return frame;
+                }
+                catch (Exception ex)
+                {
+                    OnErrorOccurred($"捕获帧失败: {ex.Message}");
+                    return null;
+                }
+            }
+        }
+        
+        private void SaveFrameToFile(Mat frame)
+        {
+            if (frame == null || frame.Empty())
+                return;
+
             try
             {
-                lock (_frameLock) // 加锁保证线程安全
+                // 获取唯一文件路径
+                string filePath = GetUniqueFilePath();
+                EnsureDirectoryExists(filePath);
+                
+                // 保存图像
+                using (Bitmap bitmap = BitmapConverter.ToBitmap(frame))
                 {
-                    // 检查对象有效性
-                    if (_currentFrame == null || _currentFrame.IsDisposed || _currentFrame.Empty())
-                        return null;
-
-                    // 创建深度拷贝
-                    frameCopy = _currentFrame.Clone();
-                    // 用于保存用来深度学习的对象
-                    frameCopyuse?.Dispose();
-                    frameCopyuse = _currentFrame.Clone();
+                    // 使用高质量JPEG编码保存
+                    using (var encoderParams = new EncoderParameters(1))
+                    using (var qualityParam = new EncoderParameter(Encoder.Quality, 95L))
+                    {
+                        encoderParams.Param[0] = qualityParam;
+                        ImageCodecInfo jpegEncoder = GetJpegEncoder();
+                        
+                        if (jpegEncoder != null)
+                        {
+                            bitmap.Save(filePath, jpegEncoder, encoderParams);
+                        }
+                        else
+                        {
+                            bitmap.Save(filePath, ImageFormat.Jpeg);
+                        }
+                    }
                 }
-
-                var savePath = GetUniqueFilePath();
-                using (var bitmap = BitmapConverter.ToBitmap(frameCopy))
-                {
-                    EnsureDirectoryExists(savePath);
-                    bitmap.Save(savePath, ImageFormat.Jpeg);
-                }
-                CaptureCompleted?.Invoke(this, savePath);
-                return frameCopyuse;
+                
+                // 通知完成
+                CaptureCompleted?.Invoke(this, filePath);
             }
             catch (Exception ex)
             {
-                OnErrorOccurred($"捕获失败: {ex.Message}");
-                return null; // 确保在异常情况下返回值
+                OnErrorOccurred($"保存图像失败: {ex.Message}");
             }
-            finally
+        }
+        
+        private ImageCodecInfo GetJpegEncoder()
+        {
+            ImageCodecInfo[] codecs = ImageCodecInfo.GetImageEncoders();
+            foreach (ImageCodecInfo codec in codecs)
             {
-                frameCopy?.Dispose(); // 确保临时拷贝被释放
-                //frameCopyuse?.Dispose(); // 不能释放，否则返回的对象无效
+                if (codec.FormatID == ImageFormat.Jpeg.Guid)
+                {
+                    return codec;
+                }
             }
+            return null;
         }
 
         private static string GetUniqueFilePath()
         {
-            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmssfff");
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
-                "input", $"Capture_{timestamp}.jpg");
+            string directory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CapturedImages");
+            string filename = $"Capture_{DateTime.Now:yyyyMMdd_HHmmss_fff}.jpg";
+            return Path.Combine(directory, filename);
         }
 
         private static void EnsureDirectoryExists(string filePath)
         {
-            var directory = Path.GetDirectoryName(filePath);
-            Directory.CreateDirectory(directory);
+            string directory = Path.GetDirectoryName(filePath);
+            if (!Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
         }
 
         private void OnErrorOccurred(string message)
@@ -366,30 +553,49 @@ namespace RoboVision
 
         public void Dispose()
         {
-            if (_isDisposed) return;
-
-            _isRunning = false;
-            //_captureThread?.Join(1000);
-            if (_captureThread != null && _captureThread.IsAlive)
-            {
-                if (!_captureThread.Join(2000))
-                {
-                    _captureThread.Interrupt();
-                }
-            }
-
-            _currentFrame?.Dispose();
-            _videoCapture?.Dispose();
-            _videoCapture = null;
-            _currentFrame = null;
-
-            _isDisposed = true;
+            Dispose(true);
             GC.SuppressFinalize(this);
         }
-
+        
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_isDisposed)
+            {
+                if (disposing)
+                {
+                    StopCamera();
+                    
+                    lock (_captureLock)
+                    {
+                        if (_videoCapture != null)
+                        {
+                            try
+                            {
+                                _videoCapture.Release();
+                                _videoCapture.Dispose();
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"释放视频捕获资源时出错: {ex.Message}");
+                            }
+                            finally
+                            {
+                                _videoCapture = null;
+                            }
+                        }
+                        
+                        _currentFrame?.Dispose();
+                        _currentFrame = null;
+                    }
+                }
+                
+                _isDisposed = true;
+            }
+        }
+        
         ~CameraController()
         {
-            Dispose();
+            Dispose(false);
         }
     }
 }
